@@ -69,13 +69,22 @@
   color-scheme: dark;
 }
 *{box-sizing:border-box;}
+html{ height:100%; overflow:hidden; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
 body{
+  margin:0;
   background:var(--bg);
   color:var(--text);
   font-family:var(--font-body);
-  min-height:100vh;
+  position:fixed;
+  inset:0;
+  height:100%;
+  width:100%;
+  overflow:hidden;
+  touch-action:pan-y;
+  overscroll-behavior:none;
   -webkit-font-smoothing:antialiased;
 }
+#app{ height:100%; display:flex; flex-direction:column; }
 h1,h2,h3,.num-display,.gauge-num{ font-family:var(--font-display); font-weight:700; letter-spacing:-0.01em; text-wrap:balance; }
 .mono{ font-family:var(--font-mono); font-variant-numeric:tabular-nums; }
 button{ font-family:inherit; }
@@ -83,7 +92,7 @@ input,select{ font-family:inherit; color:var(--text); }
 ::selection{ background:var(--accent); color:#fff; }
 a{ color:var(--accent); }
 
-.shell{ max-width:640px; margin:0 auto; padding:20px 16px 100px; display:flex; flex-direction:column; gap:18px; }
+.shell{ max-width:640px; width:100%; margin:0 auto; padding:20px 16px 32px; display:flex; flex-direction:column; gap:18px; flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; }
 
 .topbar{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .brand{ display:flex; align-items:center; gap:9px; }
@@ -254,7 +263,7 @@ a{ color:var(--accent); }
 .vol-bar-fill{ height:100%; border-radius:6px; transition:width .4s ease; }
 .vol-bar-val{ font-family:var(--font-mono); text-align:right; color:var(--text-dim); }
 
-.tab-bar{ position:fixed; left:0; right:0; bottom:0; background:var(--surface); border-top:1px solid var(--border); display:flex; justify-content:space-around; padding:8px 8px calc(8px + env(safe-area-inset-bottom)); box-shadow:var(--shadow-2); z-index:15; }
+.tab-bar{ flex-shrink:0; background:var(--surface); border-top:1px solid var(--border); display:flex; justify-content:space-around; padding:8px 8px calc(8px + env(safe-area-inset-bottom)); box-shadow:var(--shadow-2); z-index:15; }
 .tab-item{ background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:2px; color:var(--text-dim); font-size:10.5px; font-weight:600; cursor:pointer; padding:4px 8px; border-radius:10px; flex:1; max-width:100px; }
 .tab-item:hover{ color:var(--text); }
 .tab-item.active{ color:var(--accent); }
@@ -277,7 +286,7 @@ a{ color:var(--accent); }
 }
 </style>
 
-<div class="shell" id="app"></div>
+<div id="app"></div>
 
 <script>
 (function(){
@@ -1364,8 +1373,8 @@ function render(){
   else if(state.view==='workout') html = renderWorkout();
   else if(state.view==='detail') html = renderDetail();
   else if(state.view==='friends') html = renderFriends();
-  if(state.me && TAB_VIEWS.indexOf(state.view)>-1) html += renderTabBar();
-  app.innerHTML = html;
+  const showTabs = state.me && TAB_VIEWS.indexOf(state.view)>-1;
+  app.innerHTML = '<div class="shell">'+html+'</div>' + (showTabs ? renderTabBar() : '');
   bindInputs();
 }
 
