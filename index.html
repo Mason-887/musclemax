@@ -177,6 +177,10 @@ a{ color:var(--accent); }
 .wk-ex-row{ display:flex; justify-content:space-between; font-size:13.5px; gap:10px; }
 .wk-ex-row .sets{ color:var(--text-dim); font-family:var(--font-mono); font-size:12.5px; text-align:right; }
 .empty-state{ text-align:center; padding:40px 20px; color:var(--text-dim); font-size:14px; }
+.my-code-card{ background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:18px 20px; text-align:center; box-shadow:var(--shadow-1); }
+.my-code-num{ font-family:var(--font-mono); font-size:34px; font-weight:700; letter-spacing:0.1em; margin:8px 0 6px; }
+.my-code-hint{ font-size:12.5px; color:var(--text-dim); margin:0; line-height:1.4; }
+.friend-error{ background:var(--bad-soft); color:var(--bad); border-radius:9px; padding:9px 12px; font-size:12.5px; }
 
 /* ---- Workout logging ---- */
 .wdate{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-dim); }
@@ -453,7 +457,7 @@ let workouts = [];    // allWorkouts filtered to whichever profile is active (be
 let dbApi = null;
 let usingLocal = false;
 
-const state = { view:'home', draft:null, historyOpenId:null, pickerOpen:false, pickerQuery:'', addingCustom:false, detailExId:null, me:null, viewingFriend:null, friends:[], editingWorkoutId:null };
+const state = { view:'home', draft:null, historyOpenId:null, pickerOpen:false, pickerQuery:'', addingCustom:false, detailExId:null, me:null, viewingFriend:null, friends:[], editingWorkoutId:null, myCode:null, friendError:'' };
 
 function uid(){ return 'id_'+Math.random().toString(36).slice(2,10)+Date.now().toString(36); }
 function todayISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -488,6 +492,42 @@ function loadProfile(){
   try{ state.friends = JSON.parse(localStorage.getItem('ironledger_friends')||'[]'); }catch(e){ state.friends = []; }
 }
 function persistFriends(){ localStorage.setItem('ironledger_friends', JSON.stringify(state.friends)); }
+
+/* A friend code is a stable 6-digit PIN tied to a display name, stored
+   in Firestore under profiles/{normalized name}. It exists so adding a
+   friend takes something they had to hand you on purpose, not just a
+   name you guessed — the name alone still isn't a security boundary,
+   but this stops casual lookups. */
+function randomCode(){ return String(Math.floor(100000 + Math.random()*900000)); }
+async function ensureMyProfileCode(){
+  if(!state.me) return;
+  if(!dbApi){ // no shared store available — fall back to a device-local code
+    let code = localStorage.getItem('ironledger_mycode');
+    if(!code){ code = randomCode(); localStorage.setItem('ironledger_mycode', code); }
+    state.myCode = code;
+    render();
+    return;
+  }
+  try{
+    const ref = dbApi.collection('profiles').doc(norm(state.me));
+    const snap = await ref.get();
+    if(snap.exists && snap.data().code){
+      state.myCode = snap.data().code;
+    } else {
+      const code = randomCode();
+      await ref.set({ name: state.me, code: code });
+      state.myCode = code;
+    }
+  }catch(e){ state.myCode = null; }
+  render();
+}
+async function lookupProfileCode(name){
+  if(!dbApi) return null;
+  try{
+    const snap = await dbApi.collection('profiles').doc(norm(name)).get();
+    return snap.exists ? snap.data().code : null;
+  }catch(e){ return null; }
+}
 
 /* ---------------- storage ---------------- */
 const FIREBASE_CONFIG = {
@@ -527,6 +567,7 @@ async function initStorage(){
     loadLocal();
   }
   render();
+  if(state.me) ensureMyProfileCode();
 }
 function loadLocal(){
   usingLocal = true;
@@ -978,10 +1019,17 @@ function renderHome(){
 /* ---------------- render: friends ---------------- */
 function renderFriends(){
   let html = '<div class="topbar"><h1 style="font-size:19px; font-weight:800;">Friends</h1></div>';
-  html += '<div class="search-box"><input id="friend-input" placeholder="Add a training partner by name…"/></div>';
+  html += '<div class="my-code-card">'
+    + '<div class="gauge-label">Your Code</div>'
+    + '<div class="my-code-num">'+(state.myCode || '&hellip;')+'</div>'
+    + '<p class="my-code-hint">Share this with a training partner so they can add you. They\'ll need your name and this code.</p>'
+    + '</div>';
+  html += '<div class="search-box"><input id="friend-input" placeholder="Their name…"/></div>';
+  html += '<div class="search-box"><input id="friend-code-input" placeholder="Their 6-digit code…" inputmode="numeric" maxlength="6"/></div>';
+  if(state.friendError) html += '<div class="friend-error">'+state.friendError+'</div>';
   html += '<button class="btn btn-primary" data-action="add-friend" style="width:100%">Add Friend</button>';
   if(!state.friends.length){
-    html += '<div class="empty-state">No friends added yet.<br>Add a training partner\'s name above to see their stats — everyone who opens MuscleMax shares the same log, so any name that\'s logged a workout will show up.</div>';
+    html += '<div class="empty-state">No friends added yet.<br>Ask a training partner for their name and code from their own Friends tab, then enter both above.</div>';
   } else {
     html += '<div class="history-list">';
     state.friends.forEach(function(name){
@@ -1410,7 +1458,7 @@ function focusSearchEnd(){
 }
 
 /* ---------------- event delegation ---------------- */
-document.getElementById('app').addEventListener('click', function(e){
+document.getElementById('app').addEventListener('click', async function(e){
   const t = e.target.closest('[data-action]');
   if(!t) return;
   const action = t.getAttribute('data-action');
@@ -1421,6 +1469,7 @@ document.getElementById('app').addEventListener('click', function(e){
     localStorage.setItem('ironledger_me', val);
     refreshScope();
     render();
+    ensureMyProfileCode();
   }
   else if(action==='edit-name'){
     const val = prompt('Your name', state.me);
@@ -1431,12 +1480,20 @@ document.getElementById('app').addEventListener('click', function(e){
     localStorage.setItem('ironledger_me', trimmed);
     refreshScope();
     render();
+    ensureMyProfileCode();
   }
   else if(action==='add-friend'){
-    const input = document.getElementById('friend-input');
-    const val = input.value.trim();
-    if(!val) return;
-    if(norm(val)===norm(state.me)) return;
+    const nameInput = document.getElementById('friend-input');
+    const codeInput = document.getElementById('friend-code-input');
+    const val = nameInput.value.trim();
+    const code = codeInput.value.trim();
+    state.friendError = '';
+    if(!val || !code){ state.friendError = 'Enter both their name and code.'; render(); return; }
+    if(norm(val)===norm(state.me)){ state.friendError = "That's your own name."; render(); return; }
+    if(!/^\d{6}$/.test(code)){ state.friendError = 'Code must be 6 digits.'; render(); return; }
+    const realCode = await lookupProfileCode(val);
+    if(!realCode){ state.friendError = 'No one with that name has set up a code yet.'; render(); return; }
+    if(realCode !== code){ state.friendError = 'That code doesn\'t match that name.'; render(); return; }
     if(!state.friends.some(function(f){ return norm(f)===norm(val); })){
       state.friends.push(val);
       persistFriends();
@@ -1468,6 +1525,7 @@ document.getElementById('app').addEventListener('click', function(e){
     if(state.viewingFriend){ state.viewingFriend=null; refreshScope(); }
     state.view = t.getAttribute('data-view');
     state.historyOpenId = null;
+    state.friendError = '';
     render();
   }
   else if(action==='go-home'){ state.view='home'; render(); }
