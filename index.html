@@ -3,6 +3,8 @@
 <title>MuscleMax</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.13.2/firebase-app-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.13.2/firebase-firestore-compat.js"></script>
 <style>
 :root{
   --bg:#f6f7f9;
@@ -488,13 +490,29 @@ function loadProfile(){
 function persistFriends(){ localStorage.setItem('ironledger_friends', JSON.stringify(state.friends)); }
 
 /* ---------------- storage ---------------- */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyABmaCakknru15ejfvrCUHpVLT42izFjy4",
+  authDomain: "musclemax-94199.firebaseapp.com",
+  projectId: "musclemax-94199",
+  storageBucket: "musclemax-94199.firebasestorage.app",
+  messagingSenderId: "1254002379",
+  appId: "1:1254002379:web:9c27b8e11872e57456d54e"
+};
 async function initStorage(){
   loadProfile();
   try{
-    if(window.claude && window.claude.use){
-      dbApi = await window.claude.use('db');
+    if(window.firebase && FIREBASE_CONFIG.apiKey){
+      firebase.initializeApp(FIREBASE_CONFIG);
+      dbApi = firebase.firestore();
     }
   }catch(e){ dbApi = null; }
+  if(!dbApi){
+    try{
+      if(window.claude && window.claude.use){
+        dbApi = await window.claude.use('db');
+      }
+    }catch(e){ dbApi = null; }
+  }
   if(dbApi){
     dbApi.collection('workouts').orderBy('date','desc').limit(500).onSnapshot(function(snap){
       allWorkouts = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
