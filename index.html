@@ -181,10 +181,6 @@ a{ color:var(--accent); }
 .wk-ex-row{ display:flex; justify-content:space-between; font-size:13.5px; gap:10px; }
 .wk-ex-row .sets{ color:var(--text-dim); font-family:var(--font-mono); font-size:12.5px; text-align:right; }
 .empty-state{ text-align:center; padding:40px 20px; color:var(--text-dim); font-size:14px; }
-.my-code-card{ background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:18px 20px; text-align:center; box-shadow:var(--shadow-1); }
-.my-code-num{ font-family:var(--font-mono); font-size:34px; font-weight:700; letter-spacing:0.1em; margin:8px 0 6px; }
-.my-code-hint{ font-size:12.5px; color:var(--text-dim); margin:0; line-height:1.4; }
-.friend-error{ background:var(--bad-soft); color:var(--bad); border-radius:9px; padding:9px 12px; font-size:12.5px; }
 
 /* ---- Workout logging ---- */
 .wdate{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-dim); }
@@ -207,6 +203,9 @@ a{ color:var(--accent); }
 .ex-group-tag{ font-size:10.5px; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-dim); }
 .rec-hint{ background:var(--accent-soft); color:var(--accent-2); border-radius:9px; padding:8px 10px; font-size:12.5px; margin:10px 0; line-height:1.4; }
 :root:not([data-theme="light"]) .rec-hint, :root[data-theme="dark"] .rec-hint{ color:var(--accent-2); }
+.rec-hint.good{ background:var(--good-soft); color:var(--good); }
+.rec-list{ margin:6px 0 0; padding-left:16px; }
+.rec-list li{ margin-top:4px; }
 .set-table{ display:flex; flex-direction:column; gap:6px; margin-top:8px; }
 .set-row{ display:grid; grid-template-columns:22px 1fr 1fr 64px 26px; gap:8px; align-items:center; }
 .set-row .sidx{ font-family:var(--font-mono); font-size:12px; color:var(--text-dim); text-align:center; }
@@ -463,11 +462,12 @@ function exById(id){ return allExercises().find(e=>e.id===id); }
 
 let allWorkouts = []; // every owner's workouts, as synced from storage
 let reactions = {}; // workoutId -> { emoji: [reactor names] }
+let allProfiles = []; // every name anyone has ever set up — this app is for a closed friend group, so everyone is automatically everyone's friend
 let workouts = [];    // allWorkouts filtered to whichever profile is active (below)
 let dbApi = null;
 let usingLocal = false;
 
-const state = { view:'home', draft:null, historyOpenId:null, pickerOpen:false, pickerQuery:'', addingCustom:false, detailExId:null, me:null, viewingFriend:null, friends:[], editingWorkoutId:null, myCode:null, friendError:'' };
+const state = { view:'home', draft:null, historyOpenId:null, pickerOpen:false, pickerQuery:'', addingCustom:false, detailExId:null, me:null, viewingFriend:null, editingWorkoutId:null };
 
 function uid(){ return 'id_'+Math.random().toString(36).slice(2,10)+Date.now().toString(36); }
 function todayISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -519,9 +519,10 @@ function refreshScope(){
 }
 function loadProfile(){
   try{ state.me = localStorage.getItem('ironledger_me') || null; }catch(e){ state.me = null; }
-  try{ state.friends = JSON.parse(localStorage.getItem('ironledger_friends')||'[]'); }catch(e){ state.friends = []; }
 }
-function persistFriends(){ localStorage.setItem('ironledger_friends', JSON.stringify(state.friends)); }
+function autoFriends(){
+  return allProfiles.filter(function(n){ return norm(n)!==norm(state.me); });
+}
 
 const FEED_EMOJIS = ['🔥','💪','👏','🎉'];
 async function toggleReaction(workoutId, emoji){
@@ -549,7 +550,7 @@ function scoreForOwnerDate(owner, dateStr){
 }
 function friendsFeedWorkouts(){
   const friendSet = {};
-  state.friends.forEach(function(f){ friendSet[norm(f)] = true; });
+  autoFriends().forEach(function(f){ friendSet[norm(f)] = true; });
   return allWorkouts.filter(function(w){ return friendSet[norm(w.owner)]; })
     .sort(function(a,b){ return a.date<b.date?1:-1; })
     .slice(0,40);
@@ -561,40 +562,20 @@ function getPausedDraft(){
 function savePausedDraft(draft){ localStorage.setItem('ironledger_paused_draft', JSON.stringify(draft)); }
 function clearPausedDraft(){ localStorage.removeItem('ironledger_paused_draft'); }
 
-/* A friend code is a stable 6-digit PIN tied to a display name, stored
-   in Firestore under profiles/{normalized name}. It exists so adding a
-   friend takes something they had to hand you on purpose, not just a
-   name you guessed — the name alone still isn't a security boundary,
-   but this stops casual lookups. */
+/* Registers this device's name in the shared profiles directory, which
+   is how autoFriends() knows who exists — everyone who has ever set up
+   a name here automatically shows up as a friend to everyone else,
+   since this is a closed group for people you already trust. Still
+   writes a 'code' field (unused now) because the Firestore rules
+   require one on create; harmless to keep generating it. */
 function randomCode(){ return String(Math.floor(100000 + Math.random()*900000)); }
 async function ensureMyProfileCode(){
-  if(!state.me) return;
-  if(!dbApi){ // no shared store available — fall back to a device-local code
-    let code = localStorage.getItem('ironledger_mycode');
-    if(!code){ code = randomCode(); localStorage.setItem('ironledger_mycode', code); }
-    state.myCode = code;
-    render();
-    return;
-  }
+  if(!state.me || !dbApi) return;
   try{
     const ref = dbApi.collection('profiles').doc(norm(state.me));
     const snap = await ref.get();
-    if(snap.exists && snap.data().code){
-      state.myCode = snap.data().code;
-    } else {
-      const code = randomCode();
-      await ref.set({ name: state.me, code: code });
-      state.myCode = code;
-    }
-  }catch(e){ state.myCode = null; }
-  render();
-}
-async function lookupProfileByCode(code){
-  if(!dbApi) return null;
-  try{
-    const snap = await dbApi.collection('profiles').where('code','==',code).limit(1).get();
-    return snap.empty ? null : snap.docs[0].data();
-  }catch(e){ return null; }
+    if(!snap.exists){ await ref.set({ name: state.me, code: randomCode() }); }
+  }catch(e){}
 }
 
 /* ---------------- storage ---------------- */
@@ -635,6 +616,10 @@ async function initStorage(){
       const r = {};
       snap.docs.forEach(function(d){ r[d.id] = d.data(); });
       reactions = r;
+      render();
+    }, function(){});
+    dbApi.collection('profiles').onSnapshot(function(snap){
+      allProfiles = snap.docs.map(function(d){ return d.data().name; }).filter(Boolean);
       render();
     }, function(){});
   } else {
@@ -879,7 +864,7 @@ function sevenDayScore(){
    (volume vs your trailing 4-week average session) that day's work was.
    No frequency/balance component here — those only mean something over
    a window, not a single day. */
-function workoutDayScore(dateStr){
+function workoutDayScoreParts(dateStr){
   const dayWorkouts = workouts.filter(function(w){ return w.date===dateStr; });
   if(!dayWorkouts.length) return null;
   const entries = [].concat.apply([], dayWorkouts.map(function(w){ return w.entries||[]; }));
@@ -888,12 +873,12 @@ function workoutDayScore(dateStr){
   const cardioMin = cardioMinutes(merged);
 
   const priorSessions = workouts.filter(function(w){ const d=dateDiffDays(dateStr,w.date); return d>0 && d<=28; });
-  let volScore;
+  let volScore, avgSessionStrengthVol=null, avgSessionCardioMin=null;
   if(!priorSessions.length){
     volScore = (strengthVol>0 || cardioMin>0) ? 70 : 0;
   } else {
-    const avgSessionStrengthVol = priorSessions.reduce(function(s,w){ return s+totalVolume(w); },0)/priorSessions.length;
-    const avgSessionCardioMin = priorSessions.reduce(function(s,w){ return s+cardioMinutes(w); },0)/priorSessions.length;
+    avgSessionStrengthVol = priorSessions.reduce(function(s,w){ return s+totalVolume(w); },0)/priorSessions.length;
+    avgSessionCardioMin = priorSessions.reduce(function(s,w){ return s+cardioMinutes(w); },0)/priorSessions.length;
     volScore = blendedVolumeScore(strengthVol, avgSessionStrengthVol, cardioMin, avgSessionCardioMin);
   }
 
@@ -905,12 +890,69 @@ function workoutDayScore(dateStr){
       else if(best>0 && s.weight){ pctSum += s.weight/best; pctN++; }
     });
   });
-  let intensityScore;
-  if(strainN) intensityScore = clamp(100-Math.abs(strainSum/strainN-8.25)*28, 0, 100);
-  else if(pctN) intensityScore = clamp(100-Math.abs(pctSum/pctN-0.82)*220, 0, 100);
+  let intensityScore, strainAvg=null, pctAvg=null;
+  if(strainN){ strainAvg = strainSum/strainN; intensityScore = clamp(100-Math.abs(strainAvg-8.25)*28, 0, 100); }
+  else if(pctN){ pctAvg = pctSum/pctN; intensityScore = clamp(100-Math.abs(pctAvg-0.82)*220, 0, 100); }
   else intensityScore = 60;
 
-  return Math.round(volScore*0.5 + intensityScore*0.5);
+  const total = Math.round(volScore*0.5 + intensityScore*0.5);
+  return {
+    total, volScore:Math.round(volScore), intensityScore:Math.round(intensityScore),
+    strengthVol, cardioMin, avgSessionStrengthVol, avgSessionCardioMin, strainAvg, pctAvg
+  };
+}
+function workoutDayScore(dateStr){
+  const p = workoutDayScoreParts(dateStr);
+  return p ? p.total : null;
+}
+/* Plain-language version of "what's holding this workout's score back,
+   and what would fix it" — built from the same two factors (Volume,
+   Intensity) that make up the score itself, so the advice always
+   matches the number shown. */
+function workoutRecommendation(dateStr){
+  const p = workoutDayScoreParts(dateStr);
+  if(!p) return null;
+  if(p.total>=75) return { green:true, tips:[] };
+  const tips = [];
+  if(p.volScore < 75){
+    if(p.avgSessionStrengthVol===null && p.avgSessionCardioMin===null){
+      tips.push('Volume: not enough history yet to compare against — this sharpens up after a few more sessions.');
+    } else if(p.cardioMin>0 && p.strengthVol<=0){
+      const target = p.avgSessionCardioMin;
+      if(p.cardioMin < target){
+        tips.push('Volume: '+Math.round(p.cardioMin)+' min logged vs. your usual ~'+Math.round(target)+' min — about '+Math.max(1,Math.round(target-p.cardioMin))+' more minutes would move this into the green.');
+      } else {
+        tips.push('Volume: well above your usual ~'+Math.round(target)+' min — strong effort, but that size of jump scores lower here than a steadier increase would.');
+      }
+    } else {
+      const target = p.avgSessionStrengthVol;
+      if(p.strengthVol < target){
+        const deltaLb = Math.max(1, Math.round(target - p.strengthVol));
+        tips.push('Volume: '+Math.round(p.strengthVol).toLocaleString()+' lb vs. your usual ~'+Math.round(target).toLocaleString()+' lb — roughly one more working set (~'+deltaLb.toLocaleString()+' lb) gets this into the green.');
+      } else {
+        tips.push('Volume: well above your usual ~'+Math.round(target).toLocaleString()+' lb — a strong session, but that big a jump scores lower here than a steadier increase would.');
+      }
+    }
+  }
+  if(p.intensityScore < 75){
+    if(p.strainAvg!==null){
+      if(p.strainAvg < 8.25){
+        tips.push('Intensity: average Strain was '+p.strainAvg.toFixed(1)+' — pushing your last set or two closer to an 8-9 (a couple reps shy of failure) would move this into the green.');
+      } else {
+        tips.push('Intensity: average Strain was '+p.strainAvg.toFixed(1)+' — right at the edge. Backing off slightly protects recovery without costing much here.');
+      }
+    } else if(p.pctAvg!==null){
+      const pct = Math.round(p.pctAvg*100);
+      if(p.pctAvg < 0.82){
+        tips.push('Intensity: sets averaged about '+pct+'% of your best lift — working closer to 80-85% (or logging Strain instead) would score higher.');
+      } else {
+        tips.push('Intensity: sets averaged about '+pct+'% of your best lift — very heavy. A touch lighter is fine and easier to recover from.');
+      }
+    } else {
+      tips.push('Intensity: log a Strain rating (1-10) on your sets — right now there\'s nothing to score effort against, so it defaults to neutral.');
+    }
+  }
+  return { green:false, tips: tips };
 }
 
 function bestE1rmEver(exerciseId, beforeDate){
@@ -1183,8 +1225,8 @@ function renderHome(){
 function renderFeed(){
   let html = '<div class="topbar"><h1 style="font-size:19px; font-weight:800;">Feed</h1></div>';
   const items = friendsFeedWorkouts();
-  if(!state.friends.length){
-    html += '<div class="empty-state">No friends yet.<br>Add training partners from the Friends tab to see their workouts here.</div>';
+  if(!autoFriends().length){
+    html += '<div class="empty-state">No one else has joined yet.<br>Their workouts will show up here once they set up a name.</div>';
     return html;
   }
   if(!items.length){
@@ -1217,25 +1259,17 @@ function renderFeed(){
 
 function renderFriends(){
   let html = '<div class="topbar"><h1 style="font-size:19px; font-weight:800;">Friends</h1></div>';
-  html += '<div class="my-code-card">'
-    + '<div class="gauge-label">Your Code</div>'
-    + '<div class="my-code-num">'+(state.myCode || '&hellip;')+'</div>'
-    + '<p class="my-code-hint">Share this with a training partner so they can add you — it\'s all they need, no name required.</p>'
-    + '</div>';
-  html += '<div class="search-box"><input id="friend-code-input" placeholder="Enter their 6-digit code…" inputmode="numeric" maxlength="6"/></div>';
-  if(state.friendError) html += '<div class="friend-error">'+state.friendError+'</div>';
-  html += '<button class="btn btn-primary" data-action="add-friend" style="width:100%">Add Friend</button>';
-  if(!state.friends.length){
-    html += '<div class="empty-state">No friends added yet.<br>Ask a training partner for their 6-digit code from their own Friends tab, then enter it above.</div>';
+  const friends = autoFriends();
+  if(!friends.length){
+    html += '<div class="empty-state">No one else has joined yet.<br>Everyone who opens MuscleMax and sets up a name shows up here automatically.</div>';
   } else {
     html += '<div class="history-list">';
-    state.friends.forEach(function(name){
+    friends.forEach(function(name){
       const theirs = allWorkouts.filter(function(w){ return norm(w.owner)===norm(name); });
       const count7 = theirs.filter(function(w){ return daysAgo(w.date)<=7; }).length;
       html += '<div class="wk-card" data-action="view-friend" data-name="'+name+'">'
         + '<div class="wk-top"><div><div class="wk-date">'+name+'</div><div class="wk-sub">'+theirs.length+' workout'+(theirs.length===1?'':'s')+' logged'+(theirs.length?'':' &middot; no data yet')+'</div></div>'
         + '<span class="score-pill" style="background:var(--surface-2); color:var(--text-dim)">'+count7+' this wk</span></div>'
-        + '<button class="ex-remove" data-action="remove-friend" data-name="'+name+'" style="margin-top:8px">remove</button>'
         + '</div>';
     });
     html += '</div>';
@@ -1475,6 +1509,14 @@ function renderHistory(){
         }).join(', ');
         html += '<div class="wk-ex-row"><span>'+(ex?ex.name:en.exerciseId)+'</span><span class="sets">'+setsLabel+'</span></div>';
       });
+      const rec = workoutRecommendation(w.date);
+      if(rec && !rec.green && rec.tips.length){
+        html += '<div class="rec-hint"><b>To make this a green workout:</b><ul class="rec-list">'
+          + rec.tips.map(function(tip){ return '<li>'+tip+'</li>'; }).join('')
+          + '</ul></div>';
+      } else if(rec && rec.green){
+        html += '<div class="rec-hint good"><b>Already a green workout</b> — solid volume and effort for where you\'re at.</div>';
+      }
       if(!state.viewingFriend){
         html += '<div class="wk-actions">'
           + '<button class="btn-ghost btn" data-action="edit-workout" data-id="'+w.id+'">Edit</button>'
@@ -1743,26 +1785,6 @@ document.getElementById('app').addEventListener('click', async function(e){
     render();
     ensureMyProfileCode();
   }
-  else if(action==='add-friend'){
-    const codeInput = document.getElementById('friend-code-input');
-    const code = codeInput.value.trim();
-    state.friendError = '';
-    if(!/^\d{6}$/.test(code)){ state.friendError = 'Enter a valid 6-digit code.'; render(); return; }
-    const profile = await lookupProfileByCode(code);
-    if(!profile){ state.friendError = 'No one has that code.'; render(); return; }
-    if(norm(profile.name)===norm(state.me)){ state.friendError = "That's your own code."; render(); return; }
-    if(!state.friends.some(function(f){ return norm(f)===norm(profile.name); })){
-      state.friends.push(profile.name);
-      persistFriends();
-    }
-    render();
-  }
-  else if(action==='remove-friend'){
-    const name = t.getAttribute('data-name');
-    state.friends = state.friends.filter(function(f){ return norm(f)!==norm(name); });
-    persistFriends();
-    render();
-  }
   else if(action==='view-friend'){
     state.viewingFriend = t.getAttribute('data-name');
     refreshScope();
@@ -1804,7 +1826,6 @@ document.getElementById('app').addEventListener('click', async function(e){
     if(state.viewingFriend){ state.viewingFriend=null; refreshScope(); }
     state.view = t.getAttribute('data-view');
     state.historyOpenId = null;
-    state.friendError = '';
     render();
   }
   else if(action==='react'){
