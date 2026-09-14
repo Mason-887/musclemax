@@ -182,6 +182,13 @@ a{ color:var(--accent); }
 .streak-card .streak-emoji{ font-size:26px; }
 .streak-card .streak-title{ font-weight:700; font-size:14.5px; }
 .streak-card .streak-sub{ font-size:12px; color:var(--text-dim); margin-top:2px; }
+.flame-badge{ position:relative; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
+.flame-badge svg{ display:block; }
+.flame-badge .flame-num{ position:absolute; top:52%; left:50%; transform:translate(-50%,-50%); font-family:var(--font-display); font-weight:800; color:#fff; line-height:1; }
+.streak-dashboard-card{ background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:14px 16px; display:flex; align-items:center; gap:14px; box-shadow:var(--shadow-1); }
+.streak-dashboard-card .streak-text-title{ font-weight:700; font-size:15px; }
+.streak-dashboard-card .streak-text-sub{ font-size:12px; color:var(--text-dim); margin-top:2px; }
+.feed-streak-badge{ margin-left:auto; }
 .wk-detail{ margin-top:12px; padding-top:12px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:10px; }
 .wk-ex-row{ display:flex; justify-content:space-between; font-size:13.5px; gap:10px; }
 .wk-ex-row .sets{ color:var(--text-dim); font-family:var(--font-mono); font-size:12.5px; text-align:right; }
@@ -577,6 +584,27 @@ function streakForOwner(owner, dateStr){
   let streak = 0, cursor = dateStr;
   while(dates.has(cursor)){ streak++; cursor = isoOfDaysBefore(cursor,1); }
   return streak;
+}
+/* Current streak, tolerant of "haven't logged today yet" — counts from
+   today if already logged, otherwise from yesterday, so the flame
+   doesn't drop to 0 the instant the calendar rolls over. */
+function currentStreak(owner){
+  const today = todayISO();
+  const todayStreak = streakForOwner(owner, today);
+  if(todayStreak>0) return todayStreak;
+  return streakForOwner(owner, isoOfDaysBefore(today,1));
+}
+/* Flame icon with the streak count set inside it — used on the Home
+   dashboard and the Feed header. */
+function flameBadge(count, size){
+  const w = size||34;
+  return '<span class="flame-badge" style="width:'+w+'px; height:'+w+'px;">'
+    + '<svg width="'+w+'" height="'+w+'" viewBox="0 0 24 24" fill="none">'
+    + '<path d="M12 2c1 3-2 4.2-2 7 0 1.4 1 2.5 2 2.5s2-1.1 2-2.5c1.8 1.3 3 3.6 3 5.8 0 3.6-2.7 6.2-7 6.2s-7-2.6-7-6.2C3 10.8 7 8.5 12 2z" fill="url(#flameGrad'+w+')"/>'
+    + '<defs><linearGradient id="flameGrad'+w+'" x1="12" y1="2" x2="12" y2="22" gradientUnits="userSpaceOnUse"><stop stop-color="#ffb84d"/><stop offset="1" stop-color="'+(count>0?'#ff6a3d':'#c8ccd4')+'"/></linearGradient></defs>'
+    + '</svg>'
+    + '<span class="flame-num" style="font-size:'+Math.round(w*0.36)+'px;">'+count+'</span>'
+    + '</span>';
 }
 const STREAK_MILESTONES = [5,10,15,20];
 /* Called right after a new day's first workout is saved — if that day's
@@ -1451,9 +1479,16 @@ function renderHome(){
       + '<button class="ex-remove" data-action="discard-paused">discard</button>'
       + '</div>'
     : '';
+  const myStreak = viewing ? currentStreak(viewing) : currentStreak(state.me);
+  const streakCard = '<div class="streak-dashboard-card">'
+    + flameBadge(myStreak, 44)
+    + '<div><div class="streak-text-title">'+myStreak+'-day streak</div>'
+    + '<div class="streak-text-sub">'+(myStreak>0 ? 'Keep it going — log a workout today.' : 'Log a workout today to start a streak.')+'</div></div>'
+    + '</div>';
   return ''
   + topbarHtml
   + pausedHtml
+  + streakCard
   + '<div class="gauge-card">'
   +   '<div class="gauge-head"><span class="gauge-label">Last 7 Days</span>'+(usingLocal?'<span class="gauge-label" title="Saved on this device only">On-device</span>':'')+'</div>'
   +   '<div class="gauge-wrap">'+gaugeSvg(s.total)+'<div class="gauge-value"><div class="gauge-num">'+s.total+'<span>/100</span></div>'
@@ -1479,7 +1514,8 @@ function renderHome(){
 /* ---------------- render: friends ---------------- */
 /* ---------------- render: feed ---------------- */
 function renderFeed(){
-  let html = '<div class="topbar"><h1 style="font-size:19px; font-weight:800;">Feed</h1></div>';
+  let html = '<div class="topbar"><h1 style="font-size:19px; font-weight:800;">Feed</h1>'
+    + '<div class="feed-streak-badge">'+flameBadge(currentStreak(state.me), 30)+'</div></div>';
   const items = feedItems();
   if(!autoFriends().length){
     html += '<div class="empty-state">No one else has joined yet.<br>Their workouts will show up here once they set up a name.</div>';
