@@ -277,6 +277,7 @@ a{ color:var(--accent); }
 .tab-item.active{ color:var(--accent); background:var(--accent-soft); }
 
 .last-wk-card{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:13px 16px; display:flex; align-items:center; justify-content:space-between; gap:14px; cursor:pointer; box-shadow:var(--shadow-1); transition:box-shadow .15s; }
+.last-wk-card.paused{ border-color:var(--accent); }
 .last-wk-card:hover{ box-shadow:var(--shadow-2); }
 .last-wk-left{ min-width:0; }
 .last-wk-label{ font-size:10px; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-dim); font-weight:700; }
@@ -492,6 +493,12 @@ function loadProfile(){
   try{ state.friends = JSON.parse(localStorage.getItem('ironledger_friends')||'[]'); }catch(e){ state.friends = []; }
 }
 function persistFriends(){ localStorage.setItem('ironledger_friends', JSON.stringify(state.friends)); }
+
+function getPausedDraft(){
+  try{ const raw = localStorage.getItem('ironledger_paused_draft'); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
+}
+function savePausedDraft(draft){ localStorage.setItem('ironledger_paused_draft', JSON.stringify(draft)); }
+function clearPausedDraft(){ localStorage.removeItem('ironledger_paused_draft'); }
 
 /* A friend code is a stable 6-digit PIN tied to a display name, stored
    in Firestore under profiles/{normalized name}. It exists so adding a
@@ -994,8 +1001,16 @@ function renderHome(){
     ? '<div class="topbar"><button class="back-btn" data-action="stop-viewing-friend">&larr; Back to me</button><div class="friend-banner">Viewing <b>'+viewing+'</b></div><span style="width:70px"></span></div>'
     : '<div class="topbar"><div class="brand"><span class="mark"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 12h2M18 12h2M7 8v8M17 8v8M9 12h6" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><h1>MuscleMax</h1></div>'
       + '<div class="topbar-actions"><button class="profile-chip" data-action="edit-name" title="'+state.me+'">'+initials(state.me)+'</button></div></div>';
+  const paused = viewing ? null : getPausedDraft();
+  const pausedHtml = paused
+    ? '<div class="last-wk-card paused" data-action="resume-paused">'
+      + '<div class="last-wk-left"><div class="last-wk-label" style="color:var(--accent);">Paused Workout</div><div class="last-wk-date">'+fmtDate(paused.date)+'</div><div class="last-wk-exercises">'+(paused.entries||[]).length+' exercise'+((paused.entries||[]).length===1?'':'s')+' &middot; tap to resume</div></div>'
+      + '<button class="ex-remove" data-action="discard-paused">discard</button>'
+      + '</div>'
+    : '';
   return ''
   + topbarHtml
+  + pausedHtml
   + '<div class="gauge-card">'
   +   '<div class="gauge-head"><span class="gauge-label">Last 7 Days</span>'+(usingLocal?'<span class="gauge-label" title="Saved on this device only">On-device</span>':'')+'</div>'
   +   '<div class="gauge-wrap">'+gaugeSvg(s.total)+'<div class="gauge-value"><div class="gauge-num">'+s.total+'<span>/100</span></div>'
@@ -1292,24 +1307,38 @@ function filteredExercises(){
   const q = state.pickerQuery.trim().toLowerCase();
   return allExercises().filter(function(e){ return !q || e.name.toLowerCase().indexOf(q)>-1; });
 }
-function renderPicker(){
+/* Built once per keystroke and swapped into #picker-results only — the
+   search <input> itself is never touched/rebuilt, so focus, cursor
+   position and the on-screen keyboard all survive typing. Rebuilding
+   the whole picker (input included) on every keystroke was the cause
+   of "search doesn't always work": each render tore down and recreated
+   the input element, which is exactly what makes mobile keyboards
+   flicker/dismiss and can drop fast keystrokes. */
+function pickerRowsHtml(){
   const cardioOnly = !!(state.draft && state.draft.cardioOnly);
   const list = filteredExercises().filter(function(e){ return cardioOnly ? e.cardio : true; });
-  let html = '<div class="search-box"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--text-dim)" stroke-width="2"/><path d="M21 21l-4-4" stroke="var(--text-dim)" stroke-width="2" stroke-linecap="round"/></svg>'
-    + '<input id="picker-search" placeholder="'+(cardioOnly?'Search cardio…':'Search exercises…')+'" value="'+state.pickerQuery.replace(/"/g,'&quot;')+'"/></div>';
-  html += '<div class="picker-panel">';
+  let html = '';
   const groups = cardioOnly ? ['Cardio'] : GROUP_ORDER.concat(['Cardio','Custom']);
+  let any = false;
   groups.forEach(function(g){
     const items = list.filter(function(e){ return (g==='Custom' ? e.group==='Custom' || customExercises.some(function(c){return c.id===e.id;}) : e.group===g); });
     if(!items.length) return;
+    any = true;
     if(!cardioOnly) html += '<div class="picker-group-label">'+g+'</div>';
     items.forEach(function(e){
       const last = lastPerformedSummary(e.id);
       html += '<div class="picker-row" data-action="pick-exercise" data-id="'+e.id+'"><span class="pname">'+e.name+'</span><span class="plast">'+(last||'new')+'</span></div>';
     });
   });
+  if(!any) html += '<div class="empty-state" style="padding:24px 16px;">No matches.</div>';
   if(!cardioOnly) html += '<div class="add-custom-link" data-action="open-custom">+ Add custom exercise</div>';
-  html += '</div>';
+  return html;
+}
+function renderPicker(){
+  const cardioOnly = !!(state.draft && state.draft.cardioOnly);
+  let html = '<div class="search-box"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--text-dim)" stroke-width="2"/><path d="M21 21l-4-4" stroke="var(--text-dim)" stroke-width="2" stroke-linecap="round"/></svg>'
+    + '<input id="picker-search" placeholder="'+(cardioOnly?'Search cardio…':'Search exercises…')+'" value="'+state.pickerQuery.replace(/"/g,'&quot;')+'"/></div>';
+  html += '<div class="picker-panel" id="picker-results">'+pickerRowsHtml()+'</div>';
   return html;
 }
 function renderExerciseCard(entry, idx){
@@ -1356,7 +1385,9 @@ function renderExerciseCard(entry, idx){
 function renderWorkout(){
   ensureDraft();
   const editing = !!state.editingWorkoutId;
-  let html = '<div class="topbar"><button class="back-btn" data-action="cancel-workout">&larr; Cancel</button><div class="wdate">'+(editing?'Editing &middot; ':'')+(state.draft.cardioOnly?'Cardio &middot; ':'')+fmtDate(state.draft.date)+'</div><span style="width:70px"></span></div>';
+  let html = '<div class="topbar"><button class="back-btn" data-action="cancel-workout">&larr; Cancel</button><div class="wdate">'+(editing?'Editing &middot; ':'')+(state.draft.cardioOnly?'Cardio &middot; ':'')+fmtDate(state.draft.date)+'</div>'
+    + (editing ? '<span style="width:70px"></span>' : '<button class="icon-btn" data-action="pause-workout">Pause</button>')
+    + '</div>';
   if(state.pickerOpen || state.draft.entries.length===0){
     html += renderPicker();
   } else {
@@ -1449,7 +1480,11 @@ function render(){
 function bindInputs(){
   const search = document.getElementById('picker-search');
   if(search){
-    search.addEventListener('input', function(e){ state.pickerQuery = e.target.value; render(); focusSearchEnd(); });
+    search.addEventListener('input', function(e){
+      state.pickerQuery = e.target.value;
+      const results = document.getElementById('picker-results');
+      if(results) results.innerHTML = pickerRowsHtml();
+    });
   }
 }
 function focusSearchEnd(){
@@ -1516,6 +1551,28 @@ document.getElementById('app').addEventListener('click', async function(e){
   else if(action==='stop-viewing-friend'){
     state.viewingFriend = null;
     refreshScope();
+    render();
+  }
+  else if(action==='pause-workout'){
+    savePausedDraft(state.draft);
+    state.draft = null;
+    state.pickerOpen = false;
+    state.view = 'home';
+    render();
+  }
+  else if(action==='resume-paused'){
+    const paused = getPausedDraft();
+    if(!paused) return;
+    state.draft = paused;
+    clearPausedDraft();
+    state.pickerOpen = false;
+    state.editingWorkoutId = null;
+    state.view = 'workout';
+    render();
+  }
+  else if(action==='discard-paused'){
+    if(!confirm('Discard this paused workout?')) return;
+    clearPausedDraft();
     render();
   }
   else if(action==='new-workout'){ state.draft={date:todayISO(), entries:[], cardioOnly:false}; state.pickerOpen=true; state.pickerQuery=''; state.view='workout'; render(); }
@@ -1607,6 +1664,7 @@ document.getElementById('app').addEventListener('click', async function(e){
       return { exerciseId: en.exerciseId, sets: sets };
     }).filter(function(en){ return en.sets.length; });
     if(!entries.length) return;
+    if(!confirm(state.editingWorkoutId ? 'Save these changes?' : 'Finish this workout?')) return;
     if(state.editingWorkoutId){
       updateWorkout(state.editingWorkoutId, { date: state.draft.date, entries: entries });
       state.draft = null;
