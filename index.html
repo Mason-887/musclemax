@@ -177,6 +177,11 @@ a{ color:var(--accent); }
 .reaction-btn:hover{ border-color:var(--accent); }
 .reaction-btn.mine{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent-2); font-weight:600; }
 .wk-meta b{ color:var(--text); font-family:var(--font-mono); font-weight:600; }
+.group-chip{ background:var(--surface-2); border-radius:999px; padding:3px 9px; font-size:11.5px; font-weight:600; color:var(--text); }
+.streak-card{ background:linear-gradient(135deg, var(--accent-soft), var(--surface)); border:1px solid var(--accent); border-radius:14px; padding:14px 16px; display:flex; align-items:center; gap:12px; box-shadow:var(--shadow-1); }
+.streak-card .streak-emoji{ font-size:26px; }
+.streak-card .streak-title{ font-weight:700; font-size:14.5px; }
+.streak-card .streak-sub{ font-size:12px; color:var(--text-dim); margin-top:2px; }
 .wk-detail{ margin-top:12px; padding-top:12px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:10px; }
 .wk-ex-row{ display:flex; justify-content:space-between; font-size:13.5px; gap:10px; }
 .wk-ex-row .sets{ color:var(--text-dim); font-family:var(--font-mono); font-size:12.5px; text-align:right; }
@@ -282,6 +287,12 @@ a{ color:var(--accent); }
 .tab-item svg{ width:26px; height:26px; }
 .tab-item:hover{ color:var(--text); }
 .tab-item.active{ color:var(--accent); background:var(--accent-soft); }
+.tab-item.feed-fab{ min-height:56px; justify-content:flex-start; }
+.tab-item.feed-fab .fab-circle{ width:50px; height:50px; border-radius:50%; background:var(--accent); display:flex; align-items:center; justify-content:center; margin-top:-22px; box-shadow:0 6px 14px rgba(47,95,224,.45); color:#fff; }
+.tab-item.feed-fab svg{ width:24px; height:24px; }
+.tab-item.feed-fab span{ margin-top:1px; }
+.tab-item.feed-fab.active .fab-circle{ box-shadow:0 6px 16px rgba(47,95,224,.6); }
+.tab-item.feed-fab.active{ background:none; }
 
 .last-wk-card{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:13px 16px; display:flex; align-items:center; justify-content:space-between; gap:14px; cursor:pointer; box-shadow:var(--shadow-1); transition:box-shadow .15s; }
 .last-wk-card.paused{ border-color:var(--accent); }
@@ -462,6 +473,7 @@ function exById(id){ return allExercises().find(e=>e.id===id); }
 
 let allWorkouts = []; // every owner's workouts, as synced from storage
 let reactions = {}; // workoutId -> { emoji: [reactor names] }
+let allFeedEvents = []; // milestone posts (e.g. streak notifications) that aren't tied to one workout
 let allProfiles = []; // every name anyone has ever set up — this app is for a closed friend group, so everyone is automatically everyone's friend
 let myStats = null; // { heightIn, weightLb, bodyFatPct, sex } — optional, used to make e1RM/scoring more accurate
 let workouts = [];    // allWorkouts filtered to whichever profile is active (below)
@@ -549,12 +561,56 @@ function scoreForOwnerDate(owner, dateStr){
   workouts = saved;
   return score;
 }
-function friendsFeedWorkouts(){
+
+/* ---------------- streaks ---------------- */
+function isoOfDaysBefore(dateStr, n){
+  const d = new Date(dateStr+'T00:00:00');
+  d.setDate(d.getDate()-n);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+/* Consecutive calendar days, ending at dateStr, that this owner logged
+   at least one workout — used both for the Feed widget's "day streak"
+   and for detecting 5/10/15/20-day milestones as they happen. */
+function streakForOwner(owner, dateStr){
+  const dates = new Set(allWorkouts.filter(function(w){ return norm(w.owner)===norm(owner); }).map(function(w){ return w.date; }));
+  if(!dates.size) return 0;
+  let streak = 0, cursor = dateStr;
+  while(dates.has(cursor)){ streak++; cursor = isoOfDaysBefore(cursor,1); }
+  return streak;
+}
+const STREAK_MILESTONES = [5,10,15,20];
+/* Called right after a new day's first workout is saved — if that day's
+   streak just landed exactly on a milestone, posts a notification into
+   the shared Feed. Computed from `dateStr` forward rather than relying
+   on allWorkouts already reflecting the save (which may not have synced
+   back from Firestore yet). */
+async function checkStreakMilestone(owner, dateStr){
+  const dates = new Set(allWorkouts.filter(function(w){ return norm(w.owner)===norm(owner); }).map(function(w){ return w.date; }));
+  dates.add(dateStr);
+  let streak = 0, cursor = dateStr;
+  while(dates.has(cursor)){ streak++; cursor = isoOfDaysBefore(cursor,1); }
+  if(STREAK_MILESTONES.indexOf(streak)===-1) return;
+  const event = { type:'streak', owner:owner, days:streak, date:dateStr, ts:Date.now() };
+  try{
+    if(dbApi){ await dbApi.collection('feedEvents').add(event); }
+    else { event.id = uid(); allFeedEvents.unshift(event); persistLocalFeedEvents(); render(); }
+  }catch(e){}
+}
+/* Merged Feed timeline: friends' workouts (as group/duration/streak/
+   score widgets) interleaved with streak-milestone notifications,
+   newest first. */
+function feedItems(){
   const friendSet = {};
   autoFriends().forEach(function(f){ friendSet[norm(f)] = true; });
-  return allWorkouts.filter(function(w){ return friendSet[norm(w.owner)]; })
-    .sort(function(a,b){ return a.date<b.date?1:-1; })
-    .slice(0,40);
+  const workoutItems = allWorkouts.filter(function(w){ return friendSet[norm(w.owner)]; }).map(function(w){
+    return { kind:'workout', owner:w.owner, date:w.date, ts:w.ts||0, workout:w };
+  });
+  const eventItems = allFeedEvents.filter(function(e){ return friendSet[norm(e.owner)]; }).map(function(e){
+    return { kind:'streak', owner:e.owner, date:e.date, ts:e.ts||0, days:e.days };
+  });
+  return workoutItems.concat(eventItems)
+    .sort(function(a,b){ if(a.date!==b.date) return a.date<b.date?1:-1; return (b.ts||0)-(a.ts||0); })
+    .slice(0,60);
 }
 
 function getPausedDraft(){
@@ -718,6 +774,10 @@ async function initStorage(){
       allProfiles = snap.docs.map(function(d){ return d.data().name; }).filter(Boolean);
       render();
     }, function(){});
+    dbApi.collection('feedEvents').orderBy('ts','desc').limit(100).onSnapshot(function(snap){
+      allFeedEvents = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
+      render();
+    }, function(){});
     subscribeMyStats();
   } else {
     loadLocal();
@@ -729,15 +789,18 @@ function loadLocal(){
   usingLocal = true;
   try{ allWorkouts = JSON.parse(localStorage.getItem('ironledger_workouts')||'[]'); }catch(e){ allWorkouts=[]; }
   try{ customExercises = JSON.parse(localStorage.getItem('ironledger_custom')||'[]'); }catch(e){ customExercises=[]; }
+  try{ allFeedEvents = JSON.parse(localStorage.getItem('ironledger_feed_events')||'[]'); }catch(e){ allFeedEvents=[]; }
   allWorkouts.sort(function(a,b){ return a.date<b.date?1:-1; });
   refreshScope();
   render();
 }
 function persistLocalWorkouts(){ localStorage.setItem('ironledger_workouts', JSON.stringify(allWorkouts)); }
 function persistLocalCustom(){ localStorage.setItem('ironledger_custom', JSON.stringify(customExercises)); }
+function persistLocalFeedEvents(){ localStorage.setItem('ironledger_feed_events', JSON.stringify(allFeedEvents)); }
 
 async function saveWorkout(w){
   w.owner = state.me;
+  const isNewDay = !allWorkouts.some(function(x){ return norm(x.owner)===norm(w.owner) && x.date===w.date; });
   if(dbApi){
     await dbApi.collection('workouts').add(w);
   } else {
@@ -748,6 +811,7 @@ async function saveWorkout(w){
     refreshScope();
     render();
   }
+  if(isNewDay) checkStreakMilestone(w.owner, w.date);
 }
 async function updateWorkout(id, w){
   w.owner = state.me;
@@ -808,6 +872,43 @@ function groupsHit(w){
   const gs = new Set();
   (w.entries||[]).forEach(function(en){ const ex=exById(en.exerciseId); if(ex) gs.add(ex.group); });
   return gs;
+}
+/* Weekly working-set landmarks by muscle group (hypertrophy literature
+   MEV/MAV ballpark) — bigger groups like Back tolerate and need more
+   volume than small groups like Arms or Core, so one blanket sets
+   target across the whole body isn't accurate for any of them. */
+const GROUP_WEEKLY_SET_TARGET = { Chest:12, Back:14, Legs:12, Shoulders:12, Arms:10, Core:8 };
+function groupSetsInWorkout(w, group){
+  let sets=0;
+  (w.entries||[]).forEach(function(en){
+    const ex = exById(en.exerciseId);
+    if(ex && !ex.cardio && ex.group===group) sets += (en.sets||[]).filter(function(s){ return isStrengthSetValid(en.exerciseId,s); }).length;
+  });
+  return sets;
+}
+/* Per-group session baseline: average sets logged for this group on
+   past sessions (within 28 days) that also trained it, falling back to
+   half the weekly landmark (assuming ~2x/week frequency) when there's
+   no history for that group yet. */
+function groupSessionBaseline(group, dateStr){
+  const prior = workouts.filter(function(w){ const d=dateDiffDays(dateStr,w.date); return d>0 && d<=28 && groupSetsInWorkout(w,group)>0; });
+  if(!prior.length) return (GROUP_WEEKLY_SET_TARGET[group]||10)/2;
+  return prior.reduce(function(s,w){ return s+groupSetsInWorkout(w,group); },0)/prior.length;
+}
+/* Group-relative volume: each muscle group hit that day is scored
+   against its OWN baseline/target, then averaged — so a leg day isn't
+   judged against an arms-day set count and vice versa. Returns null
+   when no trackable strength group was hit (e.g. cardio-only day). */
+function groupRelativeVolume(w, dateStr){
+  const groups = Array.from(groupsHit(w)).filter(function(g){ return GROUP_WEEKLY_SET_TARGET.hasOwnProperty(g); });
+  if(!groups.length) return null;
+  const breakdown = groups.map(function(g){
+    const sets = groupSetsInWorkout(w,g);
+    const baseline = groupSessionBaseline(g,dateStr);
+    return { group:g, sets:sets, baseline:baseline, score:ratioScore(sets,baseline) };
+  });
+  const score = breakdown.reduce(function(s,b){ return s+b.score; },0)/breakdown.length;
+  return { score:score, breakdown:breakdown };
 }
 function avgRpe(w){
   let sum=0,n=0;
@@ -990,13 +1091,17 @@ function workoutDayScoreParts(dateStr){
   const cardioMin = cardioMinutes(merged);
 
   const priorSessions = workouts.filter(function(w){ const d=dateDiffDays(dateStr,w.date); return d>0 && d<=28; });
-  let volScore, avgSessionStrengthVol=null, avgSessionCardioMin=null;
-  if(!priorSessions.length){
+  const groupVol = groupRelativeVolume(merged, dateStr);
+  let volScore, avgSessionCardioMin=null;
+  if(!priorSessions.length && groupVol===null){
     volScore = (strengthVol>0 || cardioMin>0) ? 70 : 0;
   } else {
-    avgSessionStrengthVol = priorSessions.reduce(function(s,w){ return s+totalVolume(w); },0)/priorSessions.length;
-    avgSessionCardioMin = priorSessions.reduce(function(s,w){ return s+cardioMinutes(w); },0)/priorSessions.length;
-    volScore = blendedVolumeScore(strengthVol, avgSessionStrengthVol, cardioMin, avgSessionCardioMin);
+    avgSessionCardioMin = priorSessions.length ? priorSessions.reduce(function(s,w){ return s+cardioMinutes(w); },0)/priorSessions.length : null;
+    const hasStrength = strengthVol>0 && groupVol!==null, hasCardio = cardioMin>0 && avgSessionCardioMin!==null;
+    if(hasStrength && hasCardio) volScore = (groupVol.score + ratioScore(cardioMin, avgSessionCardioMin))/2;
+    else if(hasCardio) volScore = ratioScore(cardioMin, avgSessionCardioMin);
+    else if(hasStrength) volScore = groupVol.score;
+    else volScore = (strengthVol>0 || cardioMin>0) ? 70 : 0;
   }
 
   let strainSum=0, strainN=0, pctSum=0, pctN=0;
@@ -1015,7 +1120,8 @@ function workoutDayScoreParts(dateStr){
   const total = Math.round(volScore*0.5 + intensityScore*0.5);
   return {
     total, volScore:Math.round(volScore), intensityScore:Math.round(intensityScore),
-    strengthVol, cardioMin, avgSessionStrengthVol, avgSessionCardioMin, strainAvg, pctAvg
+    strengthVol, cardioMin, avgSessionCardioMin, strainAvg, pctAvg,
+    groupBreakdown: groupVol ? groupVol.breakdown : null
   };
 }
 function workoutDayScore(dateStr){
@@ -1032,7 +1138,7 @@ function workoutRecommendation(dateStr){
   if(p.total>=75) return { green:true, tips:[] };
   const tips = [];
   if(p.volScore < 75){
-    if(p.avgSessionStrengthVol===null && p.avgSessionCardioMin===null){
+    if(p.avgSessionCardioMin===null && !p.groupBreakdown){
       tips.push('Volume: not enough history yet to compare against — this sharpens up after a few more sessions.');
     } else if(p.cardioMin>0 && p.strengthVol<=0){
       const target = p.avgSessionCardioMin;
@@ -1041,13 +1147,19 @@ function workoutRecommendation(dateStr){
       } else {
         tips.push('Volume: well above your usual ~'+Math.round(target)+' min — strong effort, but that size of jump scores lower here than a steadier increase would.');
       }
-    } else {
-      const target = p.avgSessionStrengthVol;
-      if(p.strengthVol < target){
-        const deltaSets = Math.max(1, Math.round(target - p.strengthVol));
-        tips.push('Volume: '+p.strengthVol+' set'+(p.strengthVol===1?'':'s')+' vs. your usual ~'+Math.round(target)+' — about '+deltaSets+' more working set'+(deltaSets===1?'':'s')+' gets this into the green.');
+    } else if(p.groupBreakdown && p.groupBreakdown.length){
+      const short = p.groupBreakdown.filter(function(b){ return b.score<75; }).sort(function(a,b){ return a.score-b.score; });
+      if(!short.length){
+        tips.push('Volume: every muscle group you hit today is at or above its usual set count — this factor is already scoring well.');
       } else {
-        tips.push('Volume: well above your usual ~'+Math.round(target)+' sets — a strong session, but that big a jump scores lower here than a steadier increase would.');
+        short.forEach(function(b){
+          if(b.sets < b.baseline){
+            const deltaSets = Math.max(1, Math.round(b.baseline - b.sets));
+            tips.push(b.group+': '+b.sets+' set'+(b.sets===1?'':'s')+' vs. your usual ~'+Math.round(b.baseline)+' for that group — about '+deltaSets+' more working set'+(deltaSets===1?'':'s')+' gets it into the green.');
+          } else {
+            tips.push(b.group+': well above your usual ~'+Math.round(b.baseline)+' sets for that group — a strong hit, but that big a jump scores lower here than a steadier increase would.');
+          }
+        });
       }
     }
   }
@@ -1368,7 +1480,7 @@ function renderHome(){
 /* ---------------- render: feed ---------------- */
 function renderFeed(){
   let html = '<div class="topbar"><h1 style="font-size:19px; font-weight:800;">Feed</h1></div>';
-  const items = friendsFeedWorkouts();
+  const items = feedItems();
   if(!autoFriends().length){
     html += '<div class="empty-state">No one else has joined yet.<br>Their workouts will show up here once they set up a name.</div>';
     return html;
@@ -1378,15 +1490,30 @@ function renderFeed(){
     return html;
   }
   html += '<div class="history-list">';
-  items.forEach(function(w){
+  items.forEach(function(item){
+    if(item.kind==='streak'){
+      html += '<div class="streak-card">'
+        + '<div class="streak-emoji">🔥</div>'
+        + '<div><div class="streak-title">'+item.owner+' hit a '+item.days+'-day streak!</div>'
+        + '<div class="streak-sub">'+fmtDate(item.date)+'</div></div>'
+        + '</div>';
+      return;
+    }
+    const w = item.workout;
     const score = scoreForOwnerDate(w.owner, w.date);
     const scoreColor = score===null ? null : (score>=75?'var(--good)':(score>=50?'var(--warn)':'var(--bad)'));
-    const exNames = (w.entries||[]).map(function(en){ const ex=exById(en.exerciseId); return ex?ex.name:en.exerciseId; });
-    const exSummary = exNames.slice(0,3).join(', ') + (exNames.length>3?' +'+(exNames.length-3)+' more':'');
+    const groups = Array.from(groupsHit(w));
+    const groupChips = groups.length ? groups.map(function(g){ return '<span class="group-chip">'+g+'</span>'; }).join('') : '<span class="group-chip">Cardio</span>';
+    const streak = streakForOwner(w.owner, w.date);
     const myReactions = reactions[w.id] || {};
     html += '<div class="wk-card">'
-      + '<div class="wk-top"><div><div class="wk-date">'+w.owner+'</div><div class="wk-sub">'+fmtDate(w.date)+' &middot; '+exSummary+'</div></div>'
+      + '<div class="wk-top"><div><div class="wk-date">'+w.owner+'</div><div class="wk-sub">'+fmtDate(w.date)+'</div></div>'
       + (score!==null ? '<span class="score-pill" style="background:'+scoreColor+'; color:#fff;">'+score+'</span>' : '')
+      + '</div>'
+      + '<div class="wk-meta" style="margin-top:8px;">'+groupChips+'</div>'
+      + '<div class="wk-meta">'
+      + (w.durationMin ? '<span>Duration <b>'+w.durationMin+' min</b></span>' : '')
+      + (streak>0 ? '<span>Streak <b>'+streak+' day'+(streak===1?'':'s')+'</b></span>' : '')
       + '</div>'
       + '<div class="feed-reactions">'
       + FEED_EMOJIS.map(function(em){
@@ -1609,6 +1736,9 @@ function renderTabBar(){
   function item(view,label,icon){
     return '<button class="tab-item'+(state.view===view?' active':'')+'" data-action="go-tab" data-view="'+view+'">'+icon+'<span>'+label+'</span></button>';
   }
+  function fabItem(view,label,icon){
+    return '<button class="tab-item feed-fab'+(state.view===view?' active':'')+'" data-action="go-tab" data-view="'+view+'"><span class="fab-circle">'+icon+'</span><span>'+label+'</span></button>';
+  }
   const homeIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 11l8-7 8 7M6 10v9h5v-5h2v5h5v-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const trackIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
   const friendsIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3" stroke="currentColor" stroke-width="2"/><circle cx="17" cy="9" r="2.3" stroke="currentColor" stroke-width="2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M15 14.6c2.4 0.2 4.3 2.1 4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
@@ -1617,8 +1747,8 @@ function renderTabBar(){
   return '<div class="tab-bar">'
     + item('home','Home',homeIcon)
     + item('tracking','Tracking',trackIcon)
+    + fabItem('feed','Feed',feedIcon)
     + item('prs','PRs',prIcon)
-    + item('feed','Feed',feedIcon)
     + item('friends','Friends',friendsIcon)
     + '</div>';
 }
