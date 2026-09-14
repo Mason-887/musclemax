@@ -186,9 +186,9 @@ a{ color:var(--accent); }
 .wdate{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-dim); }
 .wdate input{ background:none; border:none; color:var(--text); font-family:var(--font-mono); font-size:13px; }
 .search-box{ display:flex; align-items:center; gap:8px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:10px 14px; }
-.search-box input{ flex:1; background:none; border:none; outline:none; font-size:14.5px; }
+.search-box input{ flex:1; background:none; border:none; outline:none; font-size:16px; }
 .search-box input::placeholder{ color:var(--text-dim); }
-.picker-panel{ background:var(--surface); border:1px solid var(--border); border-radius:14px; max-height:340px; overflow-y:auto; }
+.picker-panel{ background:var(--surface); border:1px solid var(--border); border-radius:14px; }
 .picker-group-label{ background:var(--surface); font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--text-dim); font-weight:700; padding:10px 14px 6px; }
 .pr-group-label{ font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--text-dim); font-weight:700; margin:6px 0 -2px 2px; }
 .picker-row{ display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-top:1px solid var(--border); cursor:pointer; }
@@ -206,7 +206,7 @@ a{ color:var(--accent); }
 .set-table{ display:flex; flex-direction:column; gap:6px; margin-top:8px; }
 .set-row{ display:grid; grid-template-columns:22px 1fr 1fr 64px 26px; gap:8px; align-items:center; }
 .set-row .sidx{ font-family:var(--font-mono); font-size:12px; color:var(--text-dim); text-align:center; }
-.set-row input, .set-row select{ background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:8px 6px; font-size:14px; text-align:center; width:100%; }
+.set-row input, .set-row select{ background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:8px 6px; font-size:16px; text-align:center; width:100%; }
 .set-row .rm{ background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:16px; }
 .set-row .rm:hover{ color:var(--bad); }
 .set-labels{ display:grid; grid-template-columns:22px 1fr 1fr 64px 26px; gap:8px; font-size:10.5px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-dim); margin-top:10px; }
@@ -223,12 +223,16 @@ a{ color:var(--accent); }
 .btn-primary:hover{ background:var(--accent-2); }
 .btn-primary:disabled{ opacity:0.45; cursor:not-allowed; }
 .btn-ghost{ background:var(--surface); border:1px solid var(--border); color:var(--text-dim); }
+.wk-actions{ display:flex; gap:8px; }
+.wk-actions .btn{ flex:1; padding:9px; font-size:13px; }
+.btn.danger{ color:var(--bad); border-color:var(--bad); }
+.btn.danger:hover{ background:var(--bad-soft); }
 
 .modal-backdrop{ position:fixed; inset:0; background:rgba(8,10,14,0.5); display:flex; align-items:flex-end; justify-content:center; z-index:20; }
 :root[data-theme="light"] .modal-backdrop{ background:rgba(20,24,32,0.35); }
 .modal-card{ background:var(--surface); border:1px solid var(--border); border-radius:18px 18px 0 0; padding:20px; width:100%; max-width:640px; display:flex; flex-direction:column; gap:12px; box-shadow:var(--shadow-2); }
 .modal-card label{ font-size:12px; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-dim); display:block; margin-bottom:4px; }
-.modal-card input, .modal-card select{ width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:9px; padding:10px; font-size:14.5px; }
+.modal-card input, .modal-card select{ width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:9px; padding:10px; font-size:16px; }
 .modal-row2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 
 .detail-e1rm{ font-size:13px; color:var(--text-dim); }
@@ -966,7 +970,7 @@ function renderOnboarding(){
   + '<div class="gauge-card" style="text-align:center; padding:32px 22px;">'
   +   '<h2 style="font-size:20px; margin:0 0 8px;">Welcome</h2>'
   +   '<p style="color:var(--text-dim); font-size:14px; margin:0 0 16px; line-height:1.5;">What should we call you? This name goes on the workouts you log, and it\'s how training partners look you up.</p>'
-  +   '<input id="onboard-name" placeholder="Your name" style="width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:9px; padding:11px; font-size:14.5px; margin-bottom:12px; color:var(--text);"/>'
+  +   '<input id="onboard-name" placeholder="Your name" style="width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:9px; padding:11px; font-size:16px; margin-bottom:12px; color:var(--text);"/>'
   +   '<button class="btn btn-primary" data-action="save-name" style="width:100%">Continue</button>'
   + '</div>';
 }
@@ -1289,7 +1293,10 @@ function renderHistory(){
         html += '<div class="wk-ex-row"><span>'+(ex?ex.name:en.exerciseId)+'</span><span class="sets">'+setsLabel+'</span></div>';
       });
       if(!state.viewingFriend){
-        html += '<button class="ex-remove" data-action="edit-workout" data-id="'+w.id+'" style="margin-top:2px;">Edit workout</button>';
+        html += '<div class="wk-actions">'
+          + '<button class="btn-ghost btn" data-action="edit-workout" data-id="'+w.id+'">Edit</button>'
+          + '<button class="btn-ghost btn danger" data-action="delete-workout-direct" data-id="'+w.id+'">Delete</button>'
+          + '</div>';
       }
       html += '</div>';
     }
@@ -1303,9 +1310,37 @@ function renderHistory(){
 function ensureDraft(){
   if(!state.draft) state.draft = { date: todayISO(), entries: [] };
 }
+/* Muscle slang that doesn't appear in any exercise or group name as
+   written — without this, "bicep", "delts", "quads" etc. return
+   nothing even though they're exactly what someone would type. */
+const SEARCH_SYNONYMS = {
+  bicep:'curl', biceps:'curl',
+  tricep:'triceps', triceps:'triceps',
+  delt:'shoulder', delts:'shoulder', deltoid:'shoulder', deltoids:'shoulder',
+  quad:'squat', quads:'squat',
+  hamstring:'curl', hamstrings:'curl',
+  glute:'hip thrust', glutes:'hip thrust',
+  ab:'core', abs:'core',
+  lat:'pulldown row', lats:'pulldown row',
+  pec:'chest', pecs:'chest',
+  calf:'calf', calves:'calf'
+};
+/* Lowercases, turns hyphens into spaces (so "pull up" matches
+   "Pull-Up"), and strips anything else that isn't a letter/number. */
+function normalizeSearch(s){
+  return (s||'').toLowerCase().replace(/-/g,' ').replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+}
+function exerciseHaystack(e){
+  return normalizeSearch(e.name+' '+e.group+(e.cardio?' cardio':''));
+}
 function filteredExercises(){
-  const q = state.pickerQuery.trim().toLowerCase();
-  return allExercises().filter(function(e){ return !q || e.name.toLowerCase().indexOf(q)>-1; });
+  const raw = normalizeSearch(state.pickerQuery);
+  if(!raw) return allExercises();
+  const words = raw.split(' ').filter(Boolean).map(function(w){ return SEARCH_SYNONYMS[w] || w; });
+  return allExercises().filter(function(e){
+    const hay = exerciseHaystack(e);
+    return words.every(function(w){ return hay.indexOf(w)>-1; });
+  });
 }
 /* Built once per keystroke and swapped into #picker-results only — the
    search <input> itself is never touched/rebuilt, so focus, cursor
@@ -1610,6 +1645,11 @@ document.getElementById('app').addEventListener('click', async function(e){
     state.draft = null; state.editingWorkoutId = null; state.view = 'history';
     deleteWorkout(id);
     render();
+  }
+  else if(action==='delete-workout-direct'){
+    const id = t.getAttribute('data-id');
+    if(!confirm('Delete this workout? This can\'t be undone.')) return;
+    deleteWorkout(id);
   }
   else if(action==='open-picker'){ state.pickerOpen=true; state.pickerQuery=''; render(); focusSearchEnd(); }
   else if(action==='pick-exercise'){
