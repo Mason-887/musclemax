@@ -691,10 +691,21 @@ function entriesInWindow(days){
   const cutoff = days;
   return workouts.filter(function(w){ return daysAgo(w.date) <= cutoff; });
 }
+/* Training volume as the research actually measures it — hard sets,
+   not tonnage. "~10 sets/muscle group/week" is the standard unit in
+   the hypertrophy literature; total weight lifted rewards heavy
+   singles the same as high-rep sets and conflates load with work
+   done. Weight is already captured separately by Intensity and
+   Progressive Overload. Counts working (strength) sets only — cardio
+   volume is tracked in minutes elsewhere. */
 function totalVolume(w){
-  let v=0;
-  (w.entries||[]).forEach(function(en){ (en.sets||[]).forEach(function(s){ v += (s.weight||0)*(s.reps||0); }); });
-  return v;
+  let sets=0;
+  (w.entries||[]).forEach(function(en){
+    const ex = exById(en.exerciseId);
+    if(ex && ex.cardio) return;
+    sets += (en.sets||[]).filter(function(s){ return s.weight && s.reps; }).length;
+  });
+  return sets;
 }
 function groupsHit(w){
   const gs = new Set();
@@ -726,8 +737,8 @@ function ratioScore(current, baseline){
   if(ratio<1.0) return clamp(100-(1.0-ratio)*180, 0, 100);
   return clamp(100-(ratio-1.15)*140, 0, 100);
 }
-/* Volume score that counts BOTH currencies training produces: lb of
-   strength volume and minutes of cardio. Whichever ones you actually
+/* Volume score that counts BOTH currencies training produces: working
+   sets for strength and minutes for cardio. Whichever ones you actually
    did this period get scored against their own baseline and averaged,
    so a cardio-only week scores on cardio, not on the lb volume it
    will never move. */
@@ -927,10 +938,10 @@ function workoutRecommendation(dateStr){
     } else {
       const target = p.avgSessionStrengthVol;
       if(p.strengthVol < target){
-        const deltaLb = Math.max(1, Math.round(target - p.strengthVol));
-        tips.push('Volume: '+Math.round(p.strengthVol).toLocaleString()+' lb vs. your usual ~'+Math.round(target).toLocaleString()+' lb — roughly one more working set (~'+deltaLb.toLocaleString()+' lb) gets this into the green.');
+        const deltaSets = Math.max(1, Math.round(target - p.strengthVol));
+        tips.push('Volume: '+p.strengthVol+' set'+(p.strengthVol===1?'':'s')+' vs. your usual ~'+Math.round(target)+' — about '+deltaSets+' more working set'+(deltaSets===1?'':'s')+' gets this into the green.');
       } else {
-        tips.push('Volume: well above your usual ~'+Math.round(target).toLocaleString()+' lb — a strong session, but that big a jump scores lower here than a steadier increase would.');
+        tips.push('Volume: well above your usual ~'+Math.round(target)+' sets — a strong session, but that big a jump scores lower here than a steadier increase would.');
       }
     }
   }
@@ -1051,12 +1062,12 @@ function groupWeeklyVolume(group, weeksAgo){
   const lo = weeksAgo*7, hi = (weeksAgo+1)*7;
   return workouts.filter(function(w){ const d=daysAgo(w.date); return d>=lo && d<hi; })
     .reduce(function(sum,w){
-      let v=0;
+      let sets=0;
       (w.entries||[]).forEach(function(en){
         const ex = exById(en.exerciseId);
-        if(ex && ex.group===group){ (en.sets||[]).forEach(function(s){ v += (s.weight||0)*(s.reps||0); }); }
+        if(ex && ex.group===group){ sets += (en.sets||[]).filter(function(s){ return s.weight && s.reps; }).length; }
       });
-      return sum+v;
+      return sum+sets;
     }, 0);
 }
 
@@ -1344,7 +1355,7 @@ function renderVolumeBars(){
   const max = Math.max.apply(null, GROUP_ORDER.map(function(g){ return vols[g]; })) || 1;
   const rows = GROUP_ORDER.map(function(g){
     const pct = Math.round((vols[g]/max)*100);
-    return '<div class="vol-bar-row"><span class="vol-bar-label">'+g+'</span><div class="vol-bar-track"><div class="vol-bar-fill" style="width:'+pct+'%; background:'+strainColor(groupStrain(g,7))+'"></div></div><span class="vol-bar-val">'+Math.round(vols[g]).toLocaleString()+'</span></div>';
+    return '<div class="vol-bar-row"><span class="vol-bar-label">'+g+'</span><div class="vol-bar-track"><div class="vol-bar-fill" style="width:'+pct+'%; background:'+strainColor(groupStrain(g,7))+'"></div></div><span class="vol-bar-val">'+Math.round(vols[g])+' sets</span></div>';
   }).join('');
   return '<div class="trend-card"><div class="gauge-label" style="margin-bottom:10px">Volume by Muscle Group (7d)</div>'+rows+'</div>';
 }
@@ -1360,7 +1371,7 @@ function renderGroupCard(group){
   return '<div class="group-card">'
     + '<div class="group-card-head"><span class="group-dot" style="background:'+strainColor(strain)+'"></span><h3>'+group+'</h3><span class="group-strain">'+strainLabel+'</span></div>'
     + '<div class="group-stats-row">'
-    +   '<div><div class="group-stat-val">'+Math.round(thisWk).toLocaleString()+'<span style="font-size:10px;font-weight:500;"> lb</span></div><div class="group-stat-key">Volume (7d)'+deltaLabel+'</div></div>'
+    +   '<div><div class="group-stat-val">'+Math.round(thisWk)+'<span style="font-size:10px;font-weight:500;"> sets</span></div><div class="group-stat-key">Volume (7d)'+deltaLabel+'</div></div>'
     +   '<div><div class="group-stat-val">'+sessions+'</div><div class="group-stat-key">Sessions (7d)</div></div>'
     +   '<div><div class="group-stat-val">'+(lastDate?fmtDate(lastDate):'Never')+'</div><div class="group-stat-key">Last Trained</div></div>'
     + '</div></div>';
@@ -1496,7 +1507,7 @@ function renderHistory(){
     html += '<div class="wk-card" data-action="toggle-history" data-id="'+w.id+'">'
       + '<div class="wk-top"><div><div class="wk-date">'+fmtDate(w.date)+'</div><div class="wk-sub">'+Array.from(gs).join(' · ')+'</div></div>'
       + '<span class="score-pill" style="background:'+scoreColor+'; color:#fff;">'+score+'</span></div>'
-      + '<div class="wk-meta"><span>Volume <b>'+Math.round(vol).toLocaleString()+' lb</b></span><span>Sets <b>'+(w.entries||[]).reduce(function(s,e){return s+(e.sets||[]).length;},0)+'</b></span><span>Exercises <b>'+(w.entries||[]).length+'</b></span>'
+      + '<div class="wk-meta"><span>Volume <b>'+vol+' set'+(vol===1?'':'s')+'</b></span><span>Exercises <b>'+(w.entries||[]).length+'</b></span>'
       + (w.durationMin?'<span>Duration <b>'+w.durationMin+' min</b></span>':'')
       + (w.avgRestSec?'<span>Avg Rest <b>'+w.avgRestSec+'s</b></span>':'')
       + '</div>';
