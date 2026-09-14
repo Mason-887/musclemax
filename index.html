@@ -532,11 +532,11 @@ async function ensureMyProfileCode(){
   }catch(e){ state.myCode = null; }
   render();
 }
-async function lookupProfileCode(name){
+async function lookupProfileByCode(code){
   if(!dbApi) return null;
   try{
-    const snap = await dbApi.collection('profiles').doc(norm(name)).get();
-    return snap.exists ? snap.data().code : null;
+    const snap = await dbApi.collection('profiles').where('code','==',code).limit(1).get();
+    return snap.empty ? null : snap.docs[0].data();
   }catch(e){ return null; }
 }
 
@@ -1041,14 +1041,13 @@ function renderFriends(){
   html += '<div class="my-code-card">'
     + '<div class="gauge-label">Your Code</div>'
     + '<div class="my-code-num">'+(state.myCode || '&hellip;')+'</div>'
-    + '<p class="my-code-hint">Share this with a training partner so they can add you. They\'ll need your name and this code.</p>'
+    + '<p class="my-code-hint">Share this with a training partner so they can add you — it\'s all they need, no name required.</p>'
     + '</div>';
-  html += '<div class="search-box"><input id="friend-input" placeholder="Their name…"/></div>';
-  html += '<div class="search-box"><input id="friend-code-input" placeholder="Their 6-digit code…" inputmode="numeric" maxlength="6"/></div>';
+  html += '<div class="search-box"><input id="friend-code-input" placeholder="Enter their 6-digit code…" inputmode="numeric" maxlength="6"/></div>';
   if(state.friendError) html += '<div class="friend-error">'+state.friendError+'</div>';
   html += '<button class="btn btn-primary" data-action="add-friend" style="width:100%">Add Friend</button>';
   if(!state.friends.length){
-    html += '<div class="empty-state">No friends added yet.<br>Ask a training partner for their name and code from their own Friends tab, then enter both above.</div>';
+    html += '<div class="empty-state">No friends added yet.<br>Ask a training partner for their 6-digit code from their own Friends tab, then enter it above.</div>';
   } else {
     html += '<div class="history-list">';
     state.friends.forEach(function(name){
@@ -1449,7 +1448,7 @@ function renderWorkout(){
 }
 function customModal(){
   return '<div class="modal-backdrop" data-action="close-custom">'
-    + '<div class="modal-card" onclick="event.stopPropagation()">'
+    + '<div class="modal-card">'
     + '<h3 style="margin:0 0 4px;font-size:17px">New Exercise</h3>'
     + '<div><label>Name</label><input id="ce-name" placeholder="e.g. Cable Row"/></div>'
     + '<div class="modal-row2"><div><label>Muscle Group</label><select id="ce-group">'+GROUP_ORDER.map(function(g){return '<option>'+g+'</option>';}).join('')+'</select></div>'
@@ -1553,19 +1552,15 @@ document.getElementById('app').addEventListener('click', async function(e){
     ensureMyProfileCode();
   }
   else if(action==='add-friend'){
-    const nameInput = document.getElementById('friend-input');
     const codeInput = document.getElementById('friend-code-input');
-    const val = nameInput.value.trim();
     const code = codeInput.value.trim();
     state.friendError = '';
-    if(!val || !code){ state.friendError = 'Enter both their name and code.'; render(); return; }
-    if(norm(val)===norm(state.me)){ state.friendError = "That's your own name."; render(); return; }
-    if(!/^\d{6}$/.test(code)){ state.friendError = 'Code must be 6 digits.'; render(); return; }
-    const realCode = await lookupProfileCode(val);
-    if(!realCode){ state.friendError = 'No one with that name has set up a code yet.'; render(); return; }
-    if(realCode !== code){ state.friendError = 'That code doesn\'t match that name.'; render(); return; }
-    if(!state.friends.some(function(f){ return norm(f)===norm(val); })){
-      state.friends.push(val);
+    if(!/^\d{6}$/.test(code)){ state.friendError = 'Enter a valid 6-digit code.'; render(); return; }
+    const profile = await lookupProfileByCode(code);
+    if(!profile){ state.friendError = 'No one has that code.'; render(); return; }
+    if(norm(profile.name)===norm(state.me)){ state.friendError = "That's your own code."; render(); return; }
+    if(!state.friends.some(function(f){ return norm(f)===norm(profile.name); })){
+      state.friends.push(profile.name);
       persistFriends();
     }
     render();
@@ -1681,7 +1676,7 @@ document.getElementById('app').addEventListener('click', async function(e){
   }
   else if(action==='remove-set'){ const idx=+t.getAttribute('data-idx'), si=+t.getAttribute('data-si'); state.draft.entries[idx].sets.splice(si,1); render(); }
   else if(action==='open-custom'){ state.addingCustom=true; render(); }
-  else if(action==='close-custom'){ state.addingCustom=false; render(); }
+  else if(action==='close-custom'){ if(e.target===t){ state.addingCustom=false; render(); } }
   else if(action==='save-custom'){
     const name = document.getElementById('ce-name').value.trim();
     if(!name) return;
@@ -1689,8 +1684,7 @@ document.getElementById('app').addEventListener('click', async function(e){
     const type = document.getElementById('ce-type').value;
     const low = +document.getElementById('ce-low').value||8;
     const high = +document.getElementById('ce-high').value||12;
-    const ex = { id:'custom_'+uid(), name:name, group:group, type:type, repLow:low, repHigh:high };
-    customExercises.push(ex);
+    const ex = { name:name, group:group, type:type, repLow:low, repHigh:high };
     addCustomExercise(ex);
     state.addingCustom=false;
     render();
