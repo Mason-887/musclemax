@@ -319,8 +319,8 @@ const EXERCISES = [
   {id:'cable_fly', name:'Cable Fly', group:'Chest', type:'isolation', repLow:10, repHigh:15},
   {id:'pec_deck', name:'Pec Deck Machine', group:'Chest', type:'isolation', repLow:10, repHigh:15},
   {id:'chest_press_machine', name:'Chest Press Machine', group:'Chest', type:'compound', repLow:8, repHigh:12},
-  {id:'pushup', name:'Weighted Push-Up', group:'Chest', type:'compound', repLow:8, repHigh:15},
-  {id:'chest_dip', name:'Dip (Chest-Focused)', group:'Chest', type:'compound', repLow:6, repHigh:12},
+  {id:'pushup', name:'Weighted Push-Up', group:'Chest', type:'compound', repLow:8, repHigh:15, bodyweight:true},
+  {id:'chest_dip', name:'Dip (Chest-Focused)', group:'Chest', type:'compound', repLow:6, repHigh:12, bodyweight:true},
   // Back
   {id:'deadlift', name:'Deadlift', group:'Back', type:'compound', repLow:3, repHigh:6},
   {id:'sumo_deadlift', name:'Sumo Deadlift', group:'Back', type:'compound', repLow:3, repHigh:6},
@@ -330,8 +330,8 @@ const EXERCISES = [
   {id:'t_bar_row', name:'T-Bar Row', group:'Back', type:'compound', repLow:6, repHigh:10},
   {id:'seated_cable_row', name:'Seated Cable Row', group:'Back', type:'compound', repLow:8, repHigh:12},
   {id:'one_arm_db_row', name:'One-Arm Dumbbell Row', group:'Back', type:'compound', repLow:8, repHigh:12},
-  {id:'pullup', name:'Weighted Pull-Up', group:'Back', type:'compound', repLow:5, repHigh:10},
-  {id:'chinup', name:'Chin-Up', group:'Back', type:'compound', repLow:5, repHigh:10},
+  {id:'pullup', name:'Weighted Pull-Up', group:'Back', type:'compound', repLow:5, repHigh:10, bodyweight:true},
+  {id:'chinup', name:'Chin-Up', group:'Back', type:'compound', repLow:5, repHigh:10, bodyweight:true},
   {id:'lat_pulldown', name:'Lat Pulldown', group:'Back', type:'isolation', repLow:8, repHigh:12},
   {id:'wide_grip_pulldown', name:'Wide-Grip Pulldown', group:'Back', type:'isolation', repLow:8, repHigh:12},
   {id:'straight_arm_pulldown', name:'Straight-Arm Pulldown', group:'Back', type:'isolation', repLow:10, repHigh:15},
@@ -378,7 +378,7 @@ const EXERCISES = [
   {id:'close_grip_bench', name:'Close-Grip Bench Press', group:'Arms', type:'compound', repLow:6, repHigh:10},
   {id:'overhead_triceps_ext', name:'Overhead Triceps Extension', group:'Arms', type:'isolation', repLow:8, repHigh:12},
   {id:'triceps_pushdown', name:'Cable Triceps Pushdown', group:'Arms', type:'isolation', repLow:10, repHigh:15},
-  {id:'triceps_dip', name:'Dip (Triceps-Focused)', group:'Arms', type:'compound', repLow:6, repHigh:12},
+  {id:'triceps_dip', name:'Dip (Triceps-Focused)', group:'Arms', type:'compound', repLow:6, repHigh:12, bodyweight:true},
   {id:'triceps_kickback', name:'Triceps Kickback', group:'Arms', type:'isolation', repLow:10, repHigh:15},
   // Core
   {id:'hanging_leg_raise', name:'Hanging Leg Raise', group:'Core', type:'isolation', repLow:10, repHigh:15},
@@ -394,7 +394,7 @@ const EXERCISES = [
   {id:'single_arm_cable_fly', name:'Single-Arm Cable Fly', group:'Chest', type:'isolation', repLow:10, repHigh:15},
   {id:'machine_fly', name:'Machine Fly', group:'Chest', type:'isolation', repLow:10, repHigh:15},
   {id:'floor_press', name:'Floor Press', group:'Chest', type:'compound', repLow:5, repHigh:8},
-  {id:'wide_pushup', name:'Wide-Grip Push-Up', group:'Chest', type:'compound', repLow:8, repHigh:15},
+  {id:'wide_pushup', name:'Wide-Grip Push-Up', group:'Chest', type:'compound', repLow:8, repHigh:15, bodyweight:true},
   // Back (more)
   {id:'renegade_row', name:'Renegade Row', group:'Back', type:'compound', repLow:8, repHigh:12},
   {id:'meadows_row', name:'Meadows Row', group:'Back', type:'compound', repLow:8, repHigh:12},
@@ -429,8 +429,8 @@ const EXERCISES = [
   {id:'zottman_curl', name:'Zottman Curl', group:'Arms', type:'isolation', repLow:8, repHigh:12},
   {id:'jm_press', name:'JM Press', group:'Arms', type:'compound', repLow:6, repHigh:10},
   {id:'reverse_curl', name:'Reverse Curl', group:'Arms', type:'isolation', repLow:8, repHigh:12},
-  {id:'diamond_pushup', name:'Diamond Push-Up', group:'Arms', type:'compound', repLow:8, repHigh:15},
-  {id:'bench_dip', name:'Bench Dip', group:'Arms', type:'compound', repLow:8, repHigh:15},
+  {id:'diamond_pushup', name:'Diamond Push-Up', group:'Arms', type:'compound', repLow:8, repHigh:15, bodyweight:true},
+  {id:'bench_dip', name:'Bench Dip', group:'Arms', type:'compound', repLow:8, repHigh:15, bodyweight:true},
   {id:'twenty_one_curl', name:'21s Curl', group:'Arms', type:'isolation', repLow:7, repHigh:7},
   // Core (more)
   {id:'dead_bug', name:'Dead Bug', group:'Core', type:'isolation', repLow:10, repHigh:15},
@@ -463,11 +463,12 @@ function exById(id){ return allExercises().find(e=>e.id===id); }
 let allWorkouts = []; // every owner's workouts, as synced from storage
 let reactions = {}; // workoutId -> { emoji: [reactor names] }
 let allProfiles = []; // every name anyone has ever set up — this app is for a closed friend group, so everyone is automatically everyone's friend
+let myStats = null; // { heightIn, weightLb, bodyFatPct, sex } — optional, used to make e1RM/scoring more accurate
 let workouts = [];    // allWorkouts filtered to whichever profile is active (below)
 let dbApi = null;
 let usingLocal = false;
 
-const state = { view:'home', draft:null, historyOpenId:null, pickerOpen:false, pickerQuery:'', addingCustom:false, detailExId:null, me:null, viewingFriend:null, editingWorkoutId:null };
+const state = { view:'home', draft:null, historyOpenId:null, pickerOpen:false, pickerQuery:'', addingCustom:false, detailExId:null, me:null, viewingFriend:null, editingWorkoutId:null, editingStats:false };
 
 function uid(){ return 'id_'+Math.random().toString(36).slice(2,10)+Date.now().toString(36); }
 function todayISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -578,6 +579,101 @@ async function ensureMyProfileCode(){
   }catch(e){}
 }
 
+/* ---------------- body stats: optional, used to sharpen e1RM/scoring ---------------- */
+let _unsubMyStats = null;
+function subscribeMyStats(){
+  if(_unsubMyStats){ _unsubMyStats(); _unsubMyStats = null; }
+  myStats = null;
+  if(!dbApi || !state.me) return;
+  _unsubMyStats = dbApi.collection('bodyStats').doc(norm(state.me)).onSnapshot(function(snap){
+    myStats = snap.exists ? snap.data() : null;
+    render();
+  }, function(){});
+}
+async function saveMyStats(stats){
+  if(!state.me) return;
+  myStats = stats;
+  if(dbApi){
+    try{ await dbApi.collection('bodyStats').doc(norm(state.me)).set(stats); }catch(e){}
+  }
+  render();
+}
+/* Lean body mass is the better normalizer for strength comparisons
+   than total bodyweight — two lifters at the same weight but different
+   body fat % carry different amounts of contractile muscle. Falls back
+   to total bodyweight when body fat % isn't provided. */
+function leanMassLb(stats){
+  if(!stats || !stats.weightLb) return null;
+  if(stats.bodyFatPct){ return stats.weightLb * (1 - stats.bodyFatPct/100); }
+  return stats.weightLb;
+}
+/* Bodyweight movements (pull-ups, push-ups, dips) only ever logged
+   *added* weight, so a strict bodyweight pull-up counted as zero load
+   toward e1RM/PRs/progression — real work that should count. When the
+   lifter's weight is on file, the effective load is bodyweight + any
+   added weight. */
+function effectiveWeight(exerciseId, weight){
+  const ex = exById(exerciseId);
+  if(ex && ex.bodyweight && myStats && myStats.weightLb){
+    return (weight||0) + myStats.weightLb;
+  }
+  return weight;
+}
+/* A strict bodyweight set (0 added weight) is a real, complete set —
+   the plain "weight && reps" truthiness check used elsewhere treats 0
+   as missing, which would make bodyweight sets impossible to ever mark
+   complete. Bodyweight exercises only require reps; weight (added
+   load) may legitimately be 0. */
+function isStrengthSetValid(exerciseId, s){
+  const ex = exById(exerciseId);
+  if(ex && ex.bodyweight) return !!(s.reps);
+  return !!(s.weight && s.reps);
+}
+/* Relative-strength standards (ratio of e1RM to total bodyweight) for
+   the four main compounds, by sex, at Beginner/Novice/Intermediate/
+   Advanced/Elite thresholds — aggregated from published strength
+   standards (Strength Level's lift database, cross-checked against
+   NSCA/Barbell Medicine figures). Bodyweight ratios are the
+   conventional unit these are published in. */
+const STRENGTH_STANDARDS = {
+  back_squat:  { male:[0.75,1.0,1.75,2.5,3.0],  female:[0.5,0.75,1.25,1.75,2.25] },
+  bench_press: { male:[0.5,0.75,1.0,1.5,1.75],  female:[0.3,0.5,0.75,1.0,1.25] },
+  deadlift:    { male:[1.0,1.5,2.0,2.5,3.0],    female:[0.6,1.0,1.25,1.75,2.25] },
+  ohp:         { male:[0.35,0.5,0.75,1.0,1.25], female:[0.2,0.35,0.5,0.7,0.9] }
+};
+const STRENGTH_LEVEL_NAMES = ['Untrained','Beginner','Novice','Intermediate','Advanced','Elite'];
+function strengthLevelForLift(exerciseId, e1rmVal, stats){
+  const table = STRENGTH_STANDARDS[exerciseId];
+  if(!table || !stats || !stats.weightLb || !e1rmVal) return null;
+  const sexKey = stats.sex==='female' ? 'female' : 'male';
+  const ratio = e1rmVal / stats.weightLb;
+  const thresholds = table[sexKey];
+  let levelIdx = 0;
+  for(let i=0;i<thresholds.length;i++){ if(ratio>=thresholds[i]) levelIdx = i+1; }
+  return { levelIdx:levelIdx, levelName:STRENGTH_LEVEL_NAMES[levelIdx], ratio:ratio };
+}
+/* Average relative-strength level (0=untrained .. 5=elite) across
+   whichever main compounds have enough history — used to calibrate
+   how much e1RM growth "counts" as good progress. Progression rate
+   naturally slows with training status; a beginner should show bigger
+   raw gains to score well, an advanced lifter shouldn't be held to
+   that same bar. Returns null when there's no bodyweight on file or
+   no main-lift history yet, so callers can fall back to a neutral
+   default instead of guessing. */
+function myAvgStrengthLevel(){
+  if(!myStats || !myStats.weightLb) return null;
+  const levels = [];
+  Object.keys(STRENGTH_STANDARDS).forEach(function(id){
+    const hist = exerciseHistory(id);
+    if(!hist.length) return;
+    const best = hist.reduce(function(m,h){ return Math.max(m,h.e1rm); },0);
+    const lvl = strengthLevelForLift(id, best, myStats);
+    if(lvl) levels.push(lvl.levelIdx);
+  });
+  if(!levels.length) return null;
+  return levels.reduce(function(a,b){ return a+b; },0)/levels.length;
+}
+
 /* ---------------- storage ---------------- */
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyABmaCakknru15ejfvrCUHpVLT42izFjy4",
@@ -622,6 +718,7 @@ async function initStorage(){
       allProfiles = snap.docs.map(function(d){ return d.data().name; }).filter(Boolean);
       render();
     }, function(){});
+    subscribeMyStats();
   } else {
     loadLocal();
   }
@@ -703,7 +800,7 @@ function totalVolume(w){
   (w.entries||[]).forEach(function(en){
     const ex = exById(en.exerciseId);
     if(ex && ex.cardio) return;
-    sets += (en.sets||[]).filter(function(s){ return s.weight && s.reps; }).length;
+    sets += (en.sets||[]).filter(function(s){ return isStrengthSetValid(en.exerciseId,s); }).length;
   });
   return sets;
 }
@@ -782,7 +879,7 @@ function progressiveOverloadScore(){
     (w.entries||[]).forEach(function(en){
       const ex = exById(en.exerciseId);
       if(!ex || ex.cardio) return;
-      const top = (en.sets||[]).reduce(function(m,s){ return Math.max(m, e1rm(s.weight,s.reps)); }, 0);
+      const top = (en.sets||[]).reduce(function(m,s){ return Math.max(m, e1rm(effectiveWeight(en.exerciseId,s.weight),s.reps)); }, 0);
       if(top<=0) return;
       (byExercise[en.exerciseId] = byExercise[en.exerciseId]||[]).push({date:w.date, e1rm:top});
     });
@@ -795,7 +892,16 @@ function progressiveOverloadScore(){
   });
   if(!ratios.length) return null;
   const avgRatio = ratios.reduce(function(a,b){ return a+b; },0)/ratios.length;
-  return Math.round(clamp(50 + (avgRatio-1)*700, 0, 100));
+  /* Progression rate naturally slows with training status — a beginner
+     should show bigger raw e1RM gains to score well, but holding an
+     advanced lifter to that same bar is unrealistic and not what the
+     research shows. When bodyweight+sex are on file, relative-strength
+     level scales how sensitive the score is to a given ratio change:
+     the same small gain that barely moves a beginner's score can max
+     out an advanced lifter's. */
+  const avgLevel = myAvgStrengthLevel();
+  const sensitivity = avgLevel===null ? 700 : 700*(1+avgLevel*0.45);
+  return Math.round(clamp(50 + (avgRatio-1)*sensitivity, 0, 100));
 }
 /* Consistency: adherence is the strongest real-world predictor per
    ACSM ("the best program is the one you stick with") — this rewards
@@ -837,7 +943,7 @@ function sevenDayScore(){
       const best = bestE1rmEver(en.exerciseId, w.date);
       (en.sets||[]).forEach(function(s){
         if(s.rpe){ rpeSum+=s.rpe; rpeN++; }
-        else if(best>0 && s.weight){ pctSum += (s.weight/best); pctN++; }
+        else if(best>0 && s.weight){ pctSum += (effectiveWeight(en.exerciseId,s.weight)/best); pctN++; }
       });
     });
   });
@@ -898,7 +1004,7 @@ function workoutDayScoreParts(dateStr){
     const best = bestE1rmEver(en.exerciseId, dateStr);
     (en.sets||[]).forEach(function(s){
       if(s.rpe){ strainSum+=s.rpe; strainN++; }
-      else if(best>0 && s.weight){ pctSum += s.weight/best; pctN++; }
+      else if(best>0 && s.weight){ pctSum += effectiveWeight(en.exerciseId,s.weight)/best; pctN++; }
     });
   });
   let intensityScore, strainAvg=null, pctAvg=null;
@@ -972,7 +1078,7 @@ function bestE1rmEver(exerciseId, beforeDate){
     if(beforeDate && w.date>beforeDate) return;
     (w.entries||[]).forEach(function(en){
       if(en.exerciseId!==exerciseId) return;
-      (en.sets||[]).forEach(function(s){ const v=e1rm(s.weight,s.reps); if(v>best) best=v; });
+      (en.sets||[]).forEach(function(s){ const v=e1rm(effectiveWeight(exerciseId,s.weight),s.reps); if(v>best) best=v; });
     });
   });
   return best;
@@ -982,7 +1088,7 @@ function exerciseHistory(exerciseId){
   workouts.forEach(function(w){
     (w.entries||[]).forEach(function(en){
       if(en.exerciseId!==exerciseId) return;
-      const top = (en.sets||[]).reduce(function(m,s){ return Math.max(m, e1rm(s.weight,s.reps)); }, 0);
+      const top = (en.sets||[]).reduce(function(m,s){ return Math.max(m, e1rm(effectiveWeight(exerciseId,s.weight),s.reps)); }, 0);
       const vol = (en.sets||[]).reduce(function(s2,s){ return s2 + (s.weight||0)*(s.reps||0); }, 0);
       hist.push({ date:w.date, e1rm:top, sets:en.sets, volume:vol });
     });
@@ -1013,7 +1119,7 @@ function allPRs(){
     hist.forEach(function(h){
       if(!h.sets || !h.sets.length) return;
       const topSet = h.sets.reduce(function(m,s){ return e1rm(s.weight,s.reps) > e1rm(m.weight,m.reps) ? s : m; }, h.sets[0]);
-      const v = e1rm(topSet.weight, topSet.reps);
+      const v = e1rm(effectiveWeight(ex.id,topSet.weight), topSet.reps);
       if(!best || v>best.e1rm) best = { date:h.date, weight:topSet.weight, reps:topSet.reps, e1rm:v };
     });
     if(best) list.push({ ex:ex, best:best });
@@ -1043,7 +1149,7 @@ function groupStrain(group, days){
       (en.sets||[]).forEach(function(s){
         any = true;
         if(s.rpe){ strainSum+=s.rpe; strainN++; }
-        else if(best>0 && s.weight){ pctSum += s.weight/best; pctN++; }
+        else if(best>0 && s.weight){ pctSum += effectiveWeight(en.exerciseId,s.weight)/best; pctN++; }
       });
     });
   });
@@ -1065,12 +1171,36 @@ function groupWeeklyVolume(group, weeksAgo){
       let sets=0;
       (w.entries||[]).forEach(function(en){
         const ex = exById(en.exerciseId);
-        if(ex && ex.group===group){ sets += (en.sets||[]).filter(function(s){ return s.weight && s.reps; }).length; }
+        if(ex && ex.group===group){ sets += (en.sets||[]).filter(function(s){ return isStrengthSetValid(en.exerciseId,s); }).length; }
       });
       return sum+sets;
     }, 0);
 }
 
+/* How big a jump to recommend when it's time to add weight. Novices
+   reliably progress faster than trained lifters (the well-established
+   "newbie gains" effect), so a beginner gets a bigger jump; someone
+   already at an advanced relative-strength level gets a smaller, more
+   conservative one. Falls back to 1x (today's flat behavior) with no
+   bodyweight on file, or for lifts outside the four with published
+   standards, using the lifter's overall average level instead. */
+function progressionBumpMultiplier(exerciseId){
+  if(!myStats || !myStats.weightLb) return 1;
+  let levelIdx = null;
+  const table = STRENGTH_STANDARDS[exerciseId];
+  if(table){
+    const lvl = strengthLevelForLift(exerciseId, bestE1rmEver(exerciseId), myStats);
+    if(lvl) levelIdx = lvl.levelIdx;
+  }
+  if(levelIdx===null){
+    const avg = myAvgStrengthLevel();
+    if(avg===null) return 1;
+    levelIdx = Math.round(avg);
+  }
+  if(levelIdx<=1) return 1.8;
+  if(levelIdx>=4) return 0.5;
+  return 1;
+}
 function recommendation(exerciseId){
   const ex = exById(exerciseId);
   if(!ex || ex.cardio) return null;
@@ -1092,9 +1222,12 @@ function recommendation(exerciseId){
     return { weight:w, reps:ex.repLow, note:'Recovery dip last time — easing the load ~5% and resetting to the bottom of your rep range.' };
   }
   if(allHitTop && (avgR===null || avgR<=8.3)){
-    const bump = ex.type==='compound' ? 2.5 : (topWeight>=50?2.5:1);
+    const baseBump = ex.type==='compound' ? 2.5 : (topWeight>=50?2.5:1);
+    const mult = progressionBumpMultiplier(exerciseId);
+    const bump = Math.max(0.5, Math.round(baseBump*mult*2)/2);
     const w = roundToStep(topWeight+bump, 0.5);
-    return { weight:w, reps:ex.repLow, note:'Every set hit '+ex.repHigh+'+ reps comfortably — add '+bump+' lb and drop back to '+ex.repLow+' reps.' };
+    const levelNote = mult>1 ? ' You\'re early on this lift, so progress can come faster here.' : mult<1 ? ' Smaller, steadier jumps make sense at your current strength level.' : '';
+    return { weight:w, reps:ex.repLow, note:'Every set hit '+ex.repHigh+'+ reps comfortably — add '+bump+' lb and drop back to '+ex.repLow+' reps.'+levelNote };
   }
   const bestSet = sets.reduce(function(m,s){ return s.reps>m.reps?s:m; }, sets[0]);
   const nextReps = Math.min(ex.repHigh, (bestSet.reps||ex.repLow)+1);
@@ -1177,7 +1310,7 @@ function renderLastWorkoutWidget(){
   (last.entries||[]).forEach(function(en){
     const allTimeBefore = bestE1rmEver(en.exerciseId, last.date);
     (en.sets||[]).forEach(function(s){
-      const v = e1rm(s.weight, s.reps);
+      const v = e1rm(effectiveWeight(en.exerciseId,s.weight), s.reps);
       if(v>topE1rm){ topE1rm=v; topSet={exerciseId:en.exerciseId, weight:s.weight, reps:s.reps}; isPR = v>=allTimeBefore-0.01; }
     });
   });
@@ -1671,7 +1804,7 @@ function renderWorkout(){
   }
   const hasAnySet = state.draft.entries.some(function(en){
     const ex = exById(en.exerciseId);
-    return en.sets.some(function(s){ return (ex && ex.cardio) ? s.minutes : (s.weight && s.reps); });
+    return en.sets.some(function(s){ return (ex && ex.cardio) ? s.minutes : isStrengthSetValid(en.exerciseId,s); });
   });
   if(editing){
     html += '<div style="text-align:center; margin-top:4px;"><button class="ex-remove" data-action="delete-workout">Delete this workout</button></div>';
@@ -1692,6 +1825,21 @@ function customModal(){
     + '<div><label>Type</label><select id="ce-type"><option value="compound">Compound</option><option value="isolation">Isolation</option></select></div></div>'
     + '<div class="modal-row2"><div><label>Rep range low</label><input id="ce-low" type="number" value="8"/></div><div><label>Rep range high</label><input id="ce-high" type="number" value="12"/></div></div>'
     + '<button class="btn btn-primary" data-action="save-custom">Add Exercise</button>'
+    + '</div></div>';
+}
+
+function statsModal(){
+  const s = myStats || {};
+  return '<div class="modal-backdrop" data-action="close-stats">'
+    + '<div class="modal-card">'
+    + '<h3 style="margin:0 0 4px;font-size:17px">Your Profile</h3>'
+    + '<div><label>Name</label><input id="cs-name" value="'+(state.me||'').replace(/"/g,'&quot;')+'"/></div>'
+    + '<div class="modal-row2"><div><label>Height (in)</label><input id="cs-height" type="number" placeholder="e.g. 70" value="'+(s.heightIn||'')+'"/></div>'
+    + '<div><label>Weight (lb)</label><input id="cs-weight" type="number" placeholder="e.g. 180" value="'+(s.weightLb||'')+'"/></div></div>'
+    + '<div class="modal-row2"><div><label>Body Fat % (est.)</label><input id="cs-bf" type="number" placeholder="optional" value="'+(s.bodyFatPct||'')+'"/></div>'
+    + '<div><label>Sex</label><select id="cs-sex"><option value="">Prefer not to say</option><option value="male"'+(s.sex==='male'?' selected':'')+'>Male</option><option value="female"'+(s.sex==='female'?' selected':'')+'>Female</option></select></div></div>'
+    + '<p class="my-code-hint" style="margin:-2px 0 0;">Optional, and only used to sharpen your own numbers — fixes bodyweight-exercise tracking (pull-ups/push-ups/dips) and calibrates Progressive Overload and weight-jump suggestions to published relative-strength standards. Nothing changes if you skip this.</p>'
+    + '<button class="btn btn-primary" data-action="save-stats">Save</button>'
     + '</div></div>';
 }
 
@@ -1749,7 +1897,7 @@ function render(){
   else if(state.view==='friends') html = renderFriends();
   else if(state.view==='feed') html = renderFeed();
   const showTabs = state.me && TAB_VIEWS.indexOf(state.view)>-1;
-  app.innerHTML = '<div class="shell">'+html+'</div>' + (showTabs ? renderTabBar() : '');
+  app.innerHTML = '<div class="shell">'+html+'</div>' + (showTabs ? renderTabBar() : '') + (state.editingStats ? statsModal() : '');
   const newShell = document.querySelector('.shell');
   if(newShell) newShell.scrollTop = scrollTop;
   _lastRenderedView = state.view;
@@ -1786,15 +1934,28 @@ document.getElementById('app').addEventListener('click', async function(e){
     ensureMyProfileCode();
   }
   else if(action==='edit-name'){
-    const val = prompt('Your name', state.me);
-    if(val===null) return;
-    const trimmed = val.trim();
-    if(!trimmed) return;
-    state.me = trimmed;
-    localStorage.setItem('ironledger_me', trimmed);
-    refreshScope();
+    state.editingStats = true;
     render();
-    ensureMyProfileCode();
+  }
+  else if(action==='close-stats'){
+    if(e.target===t){ state.editingStats = false; render(); }
+  }
+  else if(action==='save-stats'){
+    const nameVal = document.getElementById('cs-name').value.trim();
+    if(nameVal && nameVal!==state.me){
+      state.me = nameVal;
+      localStorage.setItem('ironledger_me', nameVal);
+      refreshScope();
+      ensureMyProfileCode();
+      subscribeMyStats();
+    }
+    const heightIn = +document.getElementById('cs-height').value || null;
+    const weightLb = +document.getElementById('cs-weight').value || null;
+    const bodyFatPct = +document.getElementById('cs-bf').value || null;
+    const sex = document.getElementById('cs-sex').value || null;
+    state.editingStats = false;
+    render();
+    saveMyStats({ heightIn:heightIn, weightLb:weightLb, bodyFatPct:bodyFatPct, sex:sex });
   }
   else if(action==='view-friend'){
     state.viewingFriend = t.getAttribute('data-name');
@@ -1922,7 +2083,7 @@ document.getElementById('app').addEventListener('click', async function(e){
       const ex = exById(en.exerciseId);
       const sets = ex && ex.cardio
         ? en.sets.filter(function(s){ return s.minutes; }).map(function(s){ return {minutes:+s.minutes, distance:s.distance?+s.distance:null, rpe: s.rpe?+s.rpe:null}; })
-        : en.sets.filter(function(s){ return s.weight && s.reps; }).map(function(s){ return {weight:+s.weight, reps:+s.reps, rpe: s.rpe?+s.rpe:null}; });
+        : en.sets.filter(function(s){ return isStrengthSetValid(en.exerciseId,s); }).map(function(s){ return {weight:+s.weight||0, reps:+s.reps, rpe: s.rpe?+s.rpe:null}; });
       return { exerciseId: en.exerciseId, sets: sets };
     }).filter(function(en){ return en.sets.length; });
     if(!entries.length) return;
