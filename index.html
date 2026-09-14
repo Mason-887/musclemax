@@ -122,7 +122,7 @@ a{ color:var(--accent); }
 .gauge-num{ font-size:52px; font-weight:700; line-height:1; letter-spacing:-1px; }
 .gauge-num span{ font-size:20px; color:var(--text-dim); font-weight:500; }
 .gauge-tag{ font-size:13px; color:var(--text-dim); margin-top:2px; }
-.chip-row{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:14px; }
+.chip-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:14px; }
 .chip{ background:var(--surface-2); border-radius:10px; padding:9px 6px; text-align:center; }
 .chip .chip-val{ font-family:var(--font-mono); font-weight:600; font-size:15px; }
 .chip .chip-key{ font-size:10px; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-dim); margin-top:2px; }
@@ -171,7 +171,7 @@ a{ color:var(--accent); }
 .wk-date{ font-weight:600; font-size:15px; }
 .wk-sub{ font-size:12px; color:var(--text-dim); margin-top:2px; }
 .score-pill{ font-family:var(--font-mono); font-weight:600; font-size:13px; padding:4px 9px; border-radius:999px; }
-.wk-meta{ display:flex; gap:14px; margin-top:10px; font-size:12.5px; color:var(--text-dim); }
+.wk-meta{ display:flex; gap:14px; margin-top:10px; font-size:12.5px; color:var(--text-dim); flex-wrap:wrap; row-gap:6px; }
 .wk-meta b{ color:var(--text); font-family:var(--font-mono); font-weight:600; }
 .wk-detail{ margin-top:12px; padding-top:12px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:10px; }
 .wk-ex-row{ display:flex; justify-content:space-between; font-size:13.5px; gap:10px; }
@@ -474,6 +474,26 @@ function daysAgo(iso){ return (Date.now() - new Date(iso+'T00:00:00').getTime())
 function dateDiffDays(a,b){ return (new Date(a+'T00:00:00').getTime() - new Date(b+'T00:00:00').getTime()) / 86400000; }
 function round(n,p){ const m=Math.pow(10,p||0); return Math.round(n*m)/m; }
 function roundToStep(n, step){ return Math.round(n/step)*step; }
+/* Total session length from start to Finish, and average rest between
+   sets (gap between one set being logged and the next, across the
+   whole session, ignoring pause-and-resume gaps over 15 min so a
+   paused workout doesn't skew the average). */
+function computeTiming(draft){
+  const start = draft && draft.startedAt;
+  const durationMin = start ? Math.max(1, Math.round((Date.now()-start)/60000)) : null;
+  const timestamps = [];
+  (draft && draft.entries || []).forEach(function(en){
+    (en.sets||[]).forEach(function(s){ if(s.loggedAt) timestamps.push(s.loggedAt); });
+  });
+  timestamps.sort(function(a,b){ return a-b; });
+  const gaps = [];
+  for(let i=1;i<timestamps.length;i++){
+    const gapSec = (timestamps[i]-timestamps[i-1])/1000;
+    if(gapSec>0 && gapSec<900) gaps.push(gapSec);
+  }
+  const avgRestSec = gaps.length ? Math.round(gaps.reduce(function(a,b){return a+b;},0)/gaps.length) : null;
+  return { durationMin:durationMin, avgRestSec:avgRestSec };
+}
 function clamp(n,a,b){ return Math.max(a,Math.min(b,n)); }
 function e1rm(weight,reps){ if(!weight||!reps) return 0; return reps<=1 ? weight : weight*(1+reps/30); }
 function norm(s){ return (s||'').trim().toLowerCase(); }
@@ -690,12 +710,79 @@ function blendedVolumeScore(strengthNow, strengthBase, cardioNow, cardioBase){
   if(hasStrength) return ratioScore(strengthNow,strengthBase);
   return 0;
 }
+/* Frequency, research-aligned: current guidance targets each muscle
+   group at least twice a week, not just "N workouts" — a 4-day split
+   that never repeats a muscle group scores worse here than 3 full-body
+   days would, which matches the evidence better than a raw session
+   count. */
+function groupFrequencyScore(){
+  const recent = entriesInWindow(7);
+  const counts = {};
+  GROUP_ORDER.forEach(function(g){ counts[g] = 0; });
+  recent.forEach(function(w){
+    const hitToday = {};
+    (w.entries||[]).forEach(function(en){
+      const ex = exById(en.exerciseId);
+      if(ex && !ex.cardio && counts.hasOwnProperty(ex.group)) hitToday[ex.group] = true;
+    });
+    Object.keys(hitToday).forEach(function(g){ counts[g]++; });
+  });
+  const perGroup = GROUP_ORDER.map(function(g){ return clamp((counts[g]/2)*100, 0, 100); });
+  return Math.round(perGroup.reduce(function(a,b){ return a+b; },0)/perGroup.length);
+}
+/* Progressive overload: are your lifts' estimated 1RMs trending up
+   over the last 5 weeks? This is the single most-cited driver of
+   results in the research and previously had zero presence in the
+   score — the app recommended progression per-exercise but never
+   checked whether it was actually happening. */
+function progressiveOverloadScore(){
+  const cutoffDays = 35;
+  const byExercise = {};
+  workouts.forEach(function(w){
+    if(daysAgo(w.date) > cutoffDays) return;
+    (w.entries||[]).forEach(function(en){
+      const ex = exById(en.exerciseId);
+      if(!ex || ex.cardio) return;
+      const top = (en.sets||[]).reduce(function(m,s){ return Math.max(m, e1rm(s.weight,s.reps)); }, 0);
+      if(top<=0) return;
+      (byExercise[en.exerciseId] = byExercise[en.exerciseId]||[]).push({date:w.date, e1rm:top});
+    });
+  });
+  const ratios = [];
+  Object.keys(byExercise).forEach(function(id){
+    const hist = byExercise[id].sort(function(a,b){ return a.date<b.date?-1:1; });
+    if(hist.length<2) return;
+    if(hist[0].e1rm>0) ratios.push(hist[hist.length-1].e1rm/hist[0].e1rm);
+  });
+  if(!ratios.length) return null;
+  const avgRatio = ratios.reduce(function(a,b){ return a+b; },0)/ratios.length;
+  return Math.round(clamp(50 + (avgRatio-1)*700, 0, 100));
+}
+/* Consistency: adherence is the strongest real-world predictor per
+   ACSM ("the best program is the one you stick with") — this rewards
+   showing up across a longer window, separate from any single week's
+   numbers. */
+function consistencyScore(){
+  let weeksWithWorkout = 0;
+  for(let w=0; w<4; w++){
+    const hasOne = workouts.some(function(wk){ const d=daysAgo(wk.date); return d>=w*7 && d<(w+1)*7; });
+    if(hasOne) weeksWithWorkout++;
+  }
+  return Math.round((weeksWithWorkout/4)*100);
+}
+/* Recovery: the newest guidelines treat under-recovery as a real risk,
+   not just "more is always better" — this only dings training every
+   single day of the window with zero rest, and lightly at that. */
+function recoveryScore(recentCount){
+  const daysWithWorkout = new Set(entriesInWindow(7).map(function(w){ return w.date; })).size;
+  if(daysWithWorkout===0) return 0;
+  if(daysWithWorkout>=7) return 60;
+  return 100;
+}
 function sevenDayScore(){
   const recent = entriesInWindow(7);
   const prior = entriesInWindow(35).filter(function(w){ return daysAgo(w.date) > 7; });
-  // frequency
-  const freqTarget = 4;
-  const freqScore = clamp((recent.length/freqTarget)*100, 0, 100);
+  const freqScore = groupFrequencyScore();
   // volume vs trailing 4wk weekly average — strength (lb) and cardio (min) each scored on their own baseline, then blended
   const priorWeeks = 4;
   const recentStrengthVol = recent.reduce(function(s,w){ return s+totalVolume(w); },0);
@@ -725,13 +812,24 @@ function sevenDayScore(){
   } else {
     intensityScore = recent.length ? 60 : 0;
   }
-  // balance: distinct muscle groups hit over the week vs 5 of 6 target
-  const gs = new Set();
-  recent.forEach(function(w){ groupsHit(w).forEach(function(g){ gs.add(g); }); });
-  const balanceScore = clamp((gs.size/5)*100, 0, 100);
+  const overloadRaw = progressiveOverloadScore();
+  const overloadScore = overloadRaw===null ? 60 : overloadRaw;
+  const consistency = consistencyScore();
+  const recovery = recoveryScore();
 
-  const total = recent.length===0 ? 0 : Math.round(freqScore*0.30 + volScore*0.30 + intensityScore*0.20 + balanceScore*0.20);
-  return { total, freqScore:Math.round(freqScore), volScore:Math.round(volScore), intensityScore:Math.round(intensityScore), balanceScore:Math.round(balanceScore), count:recent.length };
+  const total = recent.length===0 ? 0 : Math.round(
+    freqScore*0.20 + volScore*0.20 + intensityScore*0.20 + overloadScore*0.15 + consistency*0.15 + recovery*0.10
+  );
+  return {
+    total,
+    freqScore:Math.round(freqScore),
+    volScore:Math.round(volScore),
+    intensityScore:Math.round(intensityScore),
+    overloadScore:Math.round(overloadScore),
+    consistency:Math.round(consistency),
+    recovery:Math.round(recovery),
+    count:recent.length
+  };
 }
 
 /* Single-session score for the calendar: how hard (Strain) and how much
@@ -988,7 +1086,7 @@ function renderLastWorkoutWidget(){
     });
   });
   const exNames = (last.entries||[]).map(function(en){ const ex=exById(en.exerciseId); return ex?ex.name:en.exerciseId; });
-  const exSummary = exNames.slice(0,2).join(', ') + (exNames.length>2 ? ' +'+(exNames.length-2)+' more' : '');
+  const exSummary = exNames.slice(0,2).join(', ') + (exNames.length>2 ? ' +'+(exNames.length-2)+' more' : '') + (last.durationMin ? ' &middot; '+last.durationMin+' min' : '');
   return '<div class="last-wk-card" data-action="view-day" data-date="'+last.date+'">'
     + '<div class="last-wk-left"><div class="last-wk-label">Last Workout</div><div class="last-wk-date">'+fmtDate(last.date)+'</div><div class="last-wk-exercises">'+exSummary+'</div></div>'
     + '<div class="last-wk-stats">'
@@ -1023,7 +1121,9 @@ function renderHome(){
   +     '<div class="chip"><div class="chip-val">'+s.freqScore+'</div><div class="chip-key">Frequency</div></div>'
   +     '<div class="chip"><div class="chip-val">'+s.volScore+'</div><div class="chip-key">Volume</div></div>'
   +     '<div class="chip"><div class="chip-val">'+s.intensityScore+'</div><div class="chip-key">Intensity</div></div>'
-  +     '<div class="chip"><div class="chip-val">'+s.balanceScore+'</div><div class="chip-key">Balance</div></div>'
+  +     '<div class="chip"><div class="chip-val">'+s.overloadScore+'</div><div class="chip-key">Overload</div></div>'
+  +     '<div class="chip"><div class="chip-val">'+s.consistency+'</div><div class="chip-key">Consistency</div></div>'
+  +     '<div class="chip"><div class="chip-val">'+s.recovery+'</div><div class="chip-key">Recovery</div></div>'
   +   '</div>'
   + '</div>'
   + renderLastWorkoutWidget()
@@ -1281,7 +1381,10 @@ function renderHistory(){
     html += '<div class="wk-card" data-action="toggle-history" data-id="'+w.id+'">'
       + '<div class="wk-top"><div><div class="wk-date">'+fmtDate(w.date)+'</div><div class="wk-sub">'+Array.from(gs).join(' · ')+'</div></div>'
       + '<span class="score-pill" style="background:'+scoreColor+'; color:#fff;">'+score+'</span></div>'
-      + '<div class="wk-meta"><span>Volume <b>'+Math.round(vol).toLocaleString()+' lb</b></span><span>Sets <b>'+(w.entries||[]).reduce(function(s,e){return s+(e.sets||[]).length;},0)+'</b></span><span>Exercises <b>'+(w.entries||[]).length+'</b></span></div>';
+      + '<div class="wk-meta"><span>Volume <b>'+Math.round(vol).toLocaleString()+' lb</b></span><span>Sets <b>'+(w.entries||[]).reduce(function(s,e){return s+(e.sets||[]).length;},0)+'</b></span><span>Exercises <b>'+(w.entries||[]).length+'</b></span>'
+      + (w.durationMin?'<span>Duration <b>'+w.durationMin+' min</b></span>':'')
+      + (w.avgRestSec?'<span>Avg Rest <b>'+w.avgRestSec+'s</b></span>':'')
+      + '</div>';
     if(open){
       html += '<div class="wk-detail">';
       (w.entries||[]).forEach(function(en){
@@ -1605,8 +1708,8 @@ document.getElementById('app').addEventListener('click', async function(e){
     clearPausedDraft();
     render();
   }
-  else if(action==='new-workout'){ state.draft={date:todayISO(), entries:[], cardioOnly:false}; state.pickerOpen=true; state.pickerQuery=''; state.view='workout'; render(); }
-  else if(action==='new-cardio'){ state.draft={date:todayISO(), entries:[], cardioOnly:true}; state.pickerOpen=true; state.pickerQuery=''; state.view='workout'; render(); }
+  else if(action==='new-workout'){ state.draft={date:todayISO(), entries:[], cardioOnly:false, startedAt:Date.now()}; state.pickerOpen=true; state.pickerQuery=''; state.view='workout'; render(); }
+  else if(action==='new-cardio'){ state.draft={date:todayISO(), entries:[], cardioOnly:true, startedAt:Date.now()}; state.pickerOpen=true; state.pickerQuery=''; state.view='workout'; render(); }
   else if(action==='view-history'){ state.historyOpenId=null; state.view='history'; render(); }
   else if(action==='go-tab'){
     if(state.viewingFriend){ state.viewingFriend=null; refreshScope(); }
@@ -1628,7 +1731,7 @@ document.getElementById('app').addEventListener('click', async function(e){
     const id = t.getAttribute('data-id');
     const w = workouts.find(function(x){ return x.id===id; });
     if(!w) return;
-    state.draft = { date: w.date, entries: JSON.parse(JSON.stringify(w.entries||[])) };
+    state.draft = { date: w.date, entries: JSON.parse(JSON.stringify(w.entries||[])), durationMin: w.durationMin||null, avgRestSec: w.avgRestSec||null };
     state.editingWorkoutId = id;
     state.pickerOpen = false;
     state.view = 'workout';
@@ -1657,6 +1760,7 @@ document.getElementById('app').addEventListener('click', async function(e){
       const rec = recommendation(id);
       seed = rec ? {weight:rec.weight, reps:rec.reps, rpe:null} : {weight:null, reps:ex.repLow, rpe:null};
     }
+    seed.loggedAt = Date.now();
     state.draft.entries.push({ exerciseId:id, sets:[Object.assign({}, seed)] });
     state.pickerOpen=false; state.pickerQuery='';
     render();
@@ -1668,9 +1772,9 @@ document.getElementById('app').addEventListener('click', async function(e){
     const sets = state.draft.entries[idx].sets;
     const last = sets[sets.length-1];
     if(ex && ex.cardio){
-      sets.push({ minutes:last?last.minutes:null, distance:last?last.distance:null, rpe:null });
+      sets.push({ minutes:last?last.minutes:null, distance:last?last.distance:null, rpe:null, loggedAt:Date.now() });
     } else {
-      sets.push({ weight:last?last.weight:null, reps:last?last.reps:null, rpe:null });
+      sets.push({ weight:last?last.weight:null, reps:last?last.reps:null, rpe:null, loggedAt:Date.now() });
     }
     render();
   }
@@ -1700,12 +1804,13 @@ document.getElementById('app').addEventListener('click', async function(e){
     if(!entries.length) return;
     if(!confirm(state.editingWorkoutId ? 'Save these changes?' : 'Finish this workout?')) return;
     if(state.editingWorkoutId){
-      updateWorkout(state.editingWorkoutId, { date: state.draft.date, entries: entries });
+      updateWorkout(state.editingWorkoutId, { date: state.draft.date, entries: entries, durationMin: state.draft.durationMin||null, avgRestSec: state.draft.avgRestSec||null });
       state.draft = null;
       state.editingWorkoutId = null;
       state.view = 'history';
     } else {
-      saveWorkout({ date: state.draft.date, entries: entries });
+      const timing = computeTiming(state.draft);
+      saveWorkout({ date: state.draft.date, entries: entries, durationMin: timing.durationMin, avgRestSec: timing.avgRestSec });
       state.draft = null;
       state.view = 'home';
     }
