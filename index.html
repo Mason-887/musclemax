@@ -1598,8 +1598,12 @@ function renderDetail(){
 
 /* ---------------- master render ---------------- */
 const TAB_VIEWS = ['home','tracking','prs','friends','history'];
+let _lastRenderedView = null;
 function render(){
   const app = document.getElementById('app');
+  const prevShell = document.querySelector('.shell');
+  const preserveScroll = prevShell && _lastRenderedView===state.view;
+  const scrollTop = preserveScroll ? prevShell.scrollTop : 0;
   let html = '';
   if(!state.me){ html = renderOnboarding(); }
   else if(state.view==='home') html = renderHome();
@@ -1611,6 +1615,9 @@ function render(){
   else if(state.view==='friends') html = renderFriends();
   const showTabs = state.me && TAB_VIEWS.indexOf(state.view)>-1;
   app.innerHTML = '<div class="shell">'+html+'</div>' + (showTabs ? renderTabBar() : '');
+  const newShell = document.querySelector('.shell');
+  if(newShell) newShell.scrollTop = scrollTop;
+  _lastRenderedView = state.view;
   bindInputs();
 }
 
