@@ -172,6 +172,10 @@ a{ color:var(--accent); }
 .wk-sub{ font-size:12px; color:var(--text-dim); margin-top:2px; }
 .score-pill{ font-family:var(--font-mono); font-weight:600; font-size:13px; padding:4px 9px; border-radius:999px; }
 .wk-meta{ display:flex; gap:14px; margin-top:10px; font-size:12.5px; color:var(--text-dim); flex-wrap:wrap; row-gap:6px; }
+.feed-reactions{ display:flex; gap:8px; margin-top:11px; flex-wrap:wrap; }
+.reaction-btn{ background:var(--surface-2); border:1px solid var(--border); border-radius:999px; padding:5px 10px; font-size:13.5px; cursor:pointer; color:var(--text); line-height:1.2; }
+.reaction-btn:hover{ border-color:var(--accent); }
+.reaction-btn.mine{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent-2); font-weight:600; }
 .wk-meta b{ color:var(--text); font-family:var(--font-mono); font-weight:600; }
 .wk-detail{ margin-top:12px; padding-top:12px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:10px; }
 .wk-ex-row{ display:flex; justify-content:space-between; font-size:13.5px; gap:10px; }
@@ -458,6 +462,7 @@ function allExercises(){ return EXERCISES.concat(customExercises); }
 function exById(id){ return allExercises().find(e=>e.id===id); }
 
 let allWorkouts = []; // every owner's workouts, as synced from storage
+let reactions = {}; // workoutId -> { emoji: [reactor names] }
 let workouts = [];    // allWorkouts filtered to whichever profile is active (below)
 let dbApi = null;
 let usingLocal = false;
@@ -517,6 +522,38 @@ function loadProfile(){
   try{ state.friends = JSON.parse(localStorage.getItem('ironledger_friends')||'[]'); }catch(e){ state.friends = []; }
 }
 function persistFriends(){ localStorage.setItem('ironledger_friends', JSON.stringify(state.friends)); }
+
+const FEED_EMOJIS = ['🔥','💪','👏','🎉'];
+async function toggleReaction(workoutId, emoji){
+  if(!dbApi || !state.me) return;
+  const current = (reactions[workoutId]||{})[emoji] || [];
+  const already = current.some(function(n){ return norm(n)===norm(state.me); });
+  const field = {};
+  field[emoji] = already
+    ? firebase.firestore.FieldValue.arrayRemove(state.me)
+    : firebase.firestore.FieldValue.arrayUnion(state.me);
+  try{ await dbApi.collection('reactions').doc(workoutId).set(field, {merge:true}); }catch(e){}
+}
+/* workoutDayScore()/exerciseHistory() etc. all read the module-level
+   `workouts`, which is scoped to whichever profile is "active" — fine
+   for your own data or a friend you're viewing, but the Feed shows
+   many different friends' entries in one list. This swaps the scope
+   in just long enough to compute one score, synchronously, then puts
+   it back. */
+function scoreForOwnerDate(owner, dateStr){
+  const saved = workouts;
+  workouts = allWorkouts.filter(function(w){ return norm(w.owner)===norm(owner); });
+  const score = workoutDayScore(dateStr);
+  workouts = saved;
+  return score;
+}
+function friendsFeedWorkouts(){
+  const friendSet = {};
+  state.friends.forEach(function(f){ friendSet[norm(f)] = true; });
+  return allWorkouts.filter(function(w){ return friendSet[norm(w.owner)]; })
+    .sort(function(a,b){ return a.date<b.date?1:-1; })
+    .slice(0,40);
+}
 
 function getPausedDraft(){
   try{ const raw = localStorage.getItem('ironledger_paused_draft'); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
@@ -592,6 +629,12 @@ async function initStorage(){
     }, function(){ loadLocal(); });
     dbApi.collection('customExercises').onSnapshot(function(snap){
       customExercises = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
+      render();
+    }, function(){});
+    dbApi.collection('reactions').onSnapshot(function(snap){
+      const r = {};
+      snap.docs.forEach(function(d){ r[d.id] = d.data(); });
+      reactions = r;
       render();
     }, function(){});
   } else {
@@ -1136,6 +1179,42 @@ function renderHome(){
 }
 
 /* ---------------- render: friends ---------------- */
+/* ---------------- render: feed ---------------- */
+function renderFeed(){
+  let html = '<div class="topbar"><h1 style="font-size:19px; font-weight:800;">Feed</h1></div>';
+  const items = friendsFeedWorkouts();
+  if(!state.friends.length){
+    html += '<div class="empty-state">No friends yet.<br>Add training partners from the Friends tab to see their workouts here.</div>';
+    return html;
+  }
+  if(!items.length){
+    html += '<div class="empty-state">No activity yet.<br>Your friends\' workouts will show up here as they log them.</div>';
+    return html;
+  }
+  html += '<div class="history-list">';
+  items.forEach(function(w){
+    const score = scoreForOwnerDate(w.owner, w.date);
+    const scoreColor = score===null ? null : (score>=75?'var(--good)':(score>=50?'var(--warn)':'var(--bad)'));
+    const exNames = (w.entries||[]).map(function(en){ const ex=exById(en.exerciseId); return ex?ex.name:en.exerciseId; });
+    const exSummary = exNames.slice(0,3).join(', ') + (exNames.length>3?' +'+(exNames.length-3)+' more':'');
+    const myReactions = reactions[w.id] || {};
+    html += '<div class="wk-card">'
+      + '<div class="wk-top"><div><div class="wk-date">'+w.owner+'</div><div class="wk-sub">'+fmtDate(w.date)+' &middot; '+exSummary+'</div></div>'
+      + (score!==null ? '<span class="score-pill" style="background:'+scoreColor+'; color:#fff;">'+score+'</span>' : '')
+      + '</div>'
+      + '<div class="feed-reactions">'
+      + FEED_EMOJIS.map(function(em){
+          const list = myReactions[em]||[];
+          const mine = list.some(function(n){ return norm(n)===norm(state.me); });
+          return '<button class="reaction-btn'+(mine?' mine':'')+'" data-action="react" data-id="'+w.id+'" data-emoji="'+em+'">'+em+(list.length?' '+list.length:'')+'</button>';
+        }).join('')
+      + '</div>'
+      + '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
 function renderFriends(){
   let html = '<div class="topbar"><h1 style="font-size:19px; font-weight:800;">Friends</h1></div>';
   html += '<div class="my-code-card">'
@@ -1356,10 +1435,12 @@ function renderTabBar(){
   const trackIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
   const friendsIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3" stroke="currentColor" stroke-width="2"/><circle cx="17" cy="9" r="2.3" stroke="currentColor" stroke-width="2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M15 14.6c2.4 0.2 4.3 2.1 4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
   const prIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M8 4h8v6a4 4 0 01-8 0V4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 5H5a2 2 0 000 4h3M16 5h3a2 2 0 010 4h-3M12 14v3M9 20h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+  const feedIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 5h12M4 10h16M4 15h10M4 20h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
   return '<div class="tab-bar">'
     + item('home','Home',homeIcon)
     + item('tracking','Tracking',trackIcon)
     + item('prs','PRs',prIcon)
+    + item('feed','Feed',feedIcon)
     + item('friends','Friends',friendsIcon)
     + '</div>';
 }
@@ -1597,7 +1678,7 @@ function renderDetail(){
 }
 
 /* ---------------- master render ---------------- */
-const TAB_VIEWS = ['home','tracking','prs','friends','history'];
+const TAB_VIEWS = ['home','tracking','prs','feed','friends','history'];
 let _lastRenderedView = null;
 function render(){
   const app = document.getElementById('app');
@@ -1613,6 +1694,7 @@ function render(){
   else if(state.view==='workout') html = renderWorkout();
   else if(state.view==='detail') html = renderDetail();
   else if(state.view==='friends') html = renderFriends();
+  else if(state.view==='feed') html = renderFeed();
   const showTabs = state.me && TAB_VIEWS.indexOf(state.view)>-1;
   app.innerHTML = '<div class="shell">'+html+'</div>' + (showTabs ? renderTabBar() : '');
   const newShell = document.querySelector('.shell');
@@ -1724,6 +1806,9 @@ document.getElementById('app').addEventListener('click', async function(e){
     state.historyOpenId = null;
     state.friendError = '';
     render();
+  }
+  else if(action==='react'){
+    toggleReaction(t.getAttribute('data-id'), t.getAttribute('data-emoji'));
   }
   else if(action==='go-home'){ state.view='home'; render(); }
   else if(action==='go-history'){ state.view='history'; render(); }
