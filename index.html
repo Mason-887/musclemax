@@ -305,6 +305,14 @@ a{ color:var(--accent); }
 .tab-item.feed-fab span{ margin-top:1px; }
 .tab-item.feed-fab.active .fab-circle{ box-shadow:0 6px 16px rgba(47,95,224,.6); }
 .tab-item.feed-fab.active{ background:none; }
+.tab-item{ position:relative; }
+.tab-badge{ position:absolute; top:4px; right:50%; transform:translateX(22px); min-width:17px; height:17px; border-radius:999px; background:var(--bad); color:#fff; font-size:10.5px; font-weight:700; display:flex; align-items:center; justify-content:center; padding:0 5px; line-height:1; }
+.add-friend-row{ display:flex; gap:8px; }
+.add-friend-input{ flex:1 1 auto; min-width:0; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:11px 14px; font-size:16px; outline:none; }
+.add-friend-input:focus{ border-color:var(--accent); }
+.add-friend-btn{ flex:0 0 auto; padding:11px 20px; }
+.friend-msg{ font-size:13px; color:var(--bad); background:var(--bad-soft); border-radius:9px; padding:9px 12px; }
+.friend-msg.ok{ color:var(--good); background:var(--good-soft); }
 
 .last-wk-card{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:13px 16px; display:flex; align-items:center; justify-content:space-between; gap:14px; cursor:pointer; box-shadow:var(--shadow-1); transition:box-shadow .15s; }
 .last-wk-card.paused{ border-color:var(--accent); }
@@ -486,13 +494,14 @@ function exById(id){ return allExercises().find(e=>e.id===id); }
 let allWorkouts = []; // every owner's workouts, as synced from storage
 let reactions = {}; // workoutId -> { emoji: [reactor names] }
 let allFeedEvents = []; // milestone posts (e.g. streak notifications) that aren't tied to one workout
-let allProfiles = []; // every name anyone has ever set up — this app is for a closed friend group, so everyone is automatically everyone's friend
+let allProfiles = []; // every name anyone has ever set up — the directory searched for adding friends
+let friendships = []; // one doc per pair: { id, from, to, fromName, toName, status:'pending'|'accepted', ts }
 let myStats = null; // { heightIn, weightLb, bodyFatPct, sex } — optional, used to make e1RM/scoring more accurate
 let workouts = [];    // allWorkouts filtered to whichever profile is active (below)
 let dbApi = null;
 let usingLocal = false;
 
-const state = { view:'home', draft:null, historyOpenId:null, pickerOpen:false, pickerQuery:'', addingCustom:false, detailExId:null, me:null, viewingFriend:null, editingWorkoutId:null, editingStats:false };
+const state = { view:'home', draft:null, historyOpenId:null, pickerOpen:false, pickerQuery:'', addingCustom:false, detailExId:null, me:null, viewingFriend:null, editingWorkoutId:null, editingStats:false, friendMsg:null, friendMsgOk:false };
 
 function uid(){ return 'id_'+Math.random().toString(36).slice(2,10)+Date.now().toString(36); }
 function todayISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -545,8 +554,78 @@ function refreshScope(){
 function loadProfile(){
   try{ state.me = localStorage.getItem('ironledger_me') || null; }catch(e){ state.me = null; }
 }
-function autoFriends(){
-  return allProfiles.filter(function(n){ return norm(n)!==norm(state.me); });
+/* ---------------- friendships ----------------
+   One document per pair, keyed by the two normalized names sorted
+   alphabetically, so a request can't be duplicated in both directions.
+   status is 'pending' until accepted; declining deletes the doc so the
+   pair can try again later rather than being blocked forever. */
+function pairKey(a,b){ return [norm(a),norm(b)].sort().join('__'); }
+function friendshipWith(name){
+  const key = pairKey(state.me, name);
+  return friendships.find(function(f){ return f.id===key; }) || null;
+}
+function myFriends(){
+  const me = norm(state.me);
+  return friendships.filter(function(f){
+    return f.status==='accepted' && (norm(f.from)===me || norm(f.to)===me);
+  }).map(function(f){
+    return norm(f.from)===me ? f.toName : f.fromName;
+  }).filter(Boolean);
+}
+function incomingRequests(){
+  const me = norm(state.me);
+  return friendships.filter(function(f){ return f.status==='pending' && norm(f.to)===me; });
+}
+function outgoingRequests(){
+  const me = norm(state.me);
+  return friendships.filter(function(f){ return f.status==='pending' && norm(f.from)===me; });
+}
+/* Everyone who has set up a name but isn't already connected to you in
+   some way — the one-tap "Add" list. */
+function suggestedProfiles(){
+  const me = norm(state.me);
+  return allProfiles.filter(function(n){
+    return norm(n)!==me && !friendshipWith(n);
+  });
+}
+function profileByName(name){
+  return allProfiles.find(function(n){ return norm(n)===norm(name); }) || null;
+}
+async function sendFriendRequest(name){
+  if(!state.me || !name || norm(name)===norm(state.me)) return;
+  const id = pairKey(state.me, name);
+  const doc = { from: norm(state.me), to: norm(name), fromName: state.me, toName: name, status:'pending', ts: Date.now() };
+  if(dbApi){
+    try{ await dbApi.collection('friendships').doc(id).set(doc); }catch(e){}
+  } else {
+    friendships = friendships.filter(function(f){ return f.id!==id; });
+    friendships.push(Object.assign({id:id}, doc));
+    persistLocalFriendships(); render();
+  }
+}
+async function respondToRequest(id, accept){
+  if(dbApi){
+    try{
+      if(accept) await dbApi.collection('friendships').doc(id).update({ status:'accepted' });
+      else await dbApi.collection('friendships').doc(id).delete();
+    }catch(e){}
+  } else {
+    if(accept){
+      const f = friendships.find(function(x){ return x.id===id; });
+      if(f) f.status='accepted';
+    } else {
+      friendships = friendships.filter(function(x){ return x.id!==id; });
+    }
+    persistLocalFriendships(); render();
+  }
+}
+async function removeFriendship(id){
+  if(dbApi){
+    try{ await dbApi.collection('friendships').doc(id).delete(); }catch(e){}
+  } else {
+    friendships = friendships.filter(function(x){ return x.id!==id; });
+    persistLocalFriendships(); render();
+  }
 }
 
 const FEED_EMOJIS = ['🔥','💪','👏','🎉'];
@@ -634,7 +713,7 @@ async function checkStreakMilestone(owner, dateStr){
    newest first. */
 function feedItems(){
   const friendSet = {};
-  autoFriends().forEach(function(f){ friendSet[norm(f)] = true; });
+  myFriends().forEach(function(f){ friendSet[norm(f)] = true; });
   const workoutItems = allWorkouts.filter(function(w){ return friendSet[norm(w.owner)]; }).map(function(w){
     return { kind:'workout', owner:w.owner, date:w.date, ts:w.ts||0, workout:w };
   });
@@ -652,11 +731,11 @@ function getPausedDraft(){
 function savePausedDraft(draft){ localStorage.setItem('ironledger_paused_draft', JSON.stringify(draft)); }
 function clearPausedDraft(){ localStorage.removeItem('ironledger_paused_draft'); }
 
-/* Registers this device's name in the shared profiles directory, which
-   is how autoFriends() knows who exists — everyone who has ever set up
-   a name here automatically shows up as a friend to everyone else,
-   since this is a closed group for people you already trust. Still
-   writes a 'code' field (unused now) because the Firestore rules
+/* Registers this device's name in the shared profiles directory — the
+   list searched when adding a friend by username, and the source for
+   the Suggested section. Being listed here no longer makes you anyone's
+   friend; that requires an accepted request (see friendships above).
+   Still writes a 'code' field (unused now) because the Firestore rules
    require one on create; harmless to keep generating it. */
 function randomCode(){ return String(Math.floor(100000 + Math.random()*900000)); }
 async function ensureMyProfileCode(){
@@ -807,6 +886,10 @@ async function initStorage(){
       allProfiles = snap.docs.map(function(d){ return d.data().name; }).filter(Boolean);
       render();
     }, function(){});
+    dbApi.collection('friendships').onSnapshot(function(snap){
+      friendships = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
+      render();
+    }, function(){});
     dbApi.collection('feedEvents').orderBy('ts','desc').limit(100).onSnapshot(function(snap){
       allFeedEvents = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
       render();
@@ -823,6 +906,7 @@ function loadLocal(){
   try{ allWorkouts = JSON.parse(localStorage.getItem('ironledger_workouts')||'[]'); }catch(e){ allWorkouts=[]; }
   try{ customExercises = JSON.parse(localStorage.getItem('ironledger_custom')||'[]'); }catch(e){ customExercises=[]; }
   try{ allFeedEvents = JSON.parse(localStorage.getItem('ironledger_feed_events')||'[]'); }catch(e){ allFeedEvents=[]; }
+  try{ friendships = JSON.parse(localStorage.getItem('ironledger_friendships')||'[]'); }catch(e){ friendships=[]; }
   allWorkouts.sort(function(a,b){ return a.date<b.date?1:-1; });
   refreshScope();
   render();
@@ -830,6 +914,7 @@ function loadLocal(){
 function persistLocalWorkouts(){ localStorage.setItem('ironledger_workouts', JSON.stringify(allWorkouts)); }
 function persistLocalCustom(){ localStorage.setItem('ironledger_custom', JSON.stringify(customExercises)); }
 function persistLocalFeedEvents(){ localStorage.setItem('ironledger_feed_events', JSON.stringify(allFeedEvents)); }
+function persistLocalFriendships(){ localStorage.setItem('ironledger_friendships', JSON.stringify(friendships)); }
 
 async function saveWorkout(w){
   w.owner = state.me;
@@ -1528,8 +1613,8 @@ function renderFeed(){
   let html = '<div class="topbar"><h1 style="font-size:19px; font-weight:800;">Feed</h1>'
     + '<div class="feed-streak-badge">'+flameBadge(currentStreak(state.me), 30)+'</div></div>';
   const items = feedItems();
-  if(!autoFriends().length){
-    html += '<div class="empty-state">No one else has joined yet.<br>Their workouts will show up here once they set up a name.</div>';
+  if(!myFriends().length){
+    html += '<div class="empty-state">No friends yet.<br>Add some from the Friends tab and their workouts will show up here.</div>';
     return html;
   }
   if(!items.length){
@@ -1575,20 +1660,79 @@ function renderFeed(){
   return html;
 }
 
+function friendSubtitle(name){
+  const theirs = allWorkouts.filter(function(w){ return norm(w.owner)===norm(name); });
+  return theirs.length+' workout'+(theirs.length===1?'':'s')+' logged'+(theirs.length?'':' &middot; no data yet');
+}
 function renderFriends(){
   let html = '<div class="topbar"><h1 style="font-size:19px; font-weight:800;">Friends</h1></div>';
-  const friends = autoFriends();
+
+  // Add by username
+  html += '<div class="add-friend-row">'
+    + '<input id="friend-username" class="add-friend-input" type="text" placeholder="Add by username" autocapitalize="off" autocorrect="off" spellcheck="false">'
+    + '<button class="btn btn-primary add-friend-btn" data-action="add-friend-by-name">Add</button>'
+    + '</div>';
+  if(state.friendMsg){
+    html += '<div class="friend-msg'+(state.friendMsgOk?' ok':'')+'">'+state.friendMsg+'</div>';
+  }
+
+  // Inbox — incoming requests
+  const incoming = incomingRequests();
+  if(incoming.length){
+    html += '<div class="section-title">Requests</div><div class="history-list">';
+    incoming.forEach(function(f){
+      html += '<div class="wk-card">'
+        + '<div class="wk-top"><div><div class="wk-date">'+f.fromName+'</div>'
+        + '<div class="wk-sub">wants to be your friend</div></div></div>'
+        + '<div class="wk-actions" style="margin-top:12px;">'
+        + '<button class="btn btn-primary" data-action="accept-request" data-id="'+f.id+'">Accept</button>'
+        + '<button class="btn btn-ghost" data-action="decline-request" data-id="'+f.id+'">Decline</button>'
+        + '</div></div>';
+    });
+    html += '</div>';
+  }
+
+  // Your friends
+  const friends = myFriends();
+  html += '<div class="section-title">Your Friends</div>';
   if(!friends.length){
-    html += '<div class="empty-state">No one else has joined yet.<br>Everyone who opens MuscleMax and sets up a name shows up here automatically.</div>';
+    html += '<div class="empty-state" style="padding:20px;">No friends yet — add someone by username or from Suggested below.</div>';
   } else {
     html += '<div class="history-list">';
     friends.forEach(function(name){
-      const theirs = allWorkouts.filter(function(w){ return norm(w.owner)===norm(name); });
-      const count7 = theirs.filter(function(w){ return daysAgo(w.date)<=7; }).length;
+      const count7 = allWorkouts.filter(function(w){ return norm(w.owner)===norm(name) && daysAgo(w.date)<=7; }).length;
       html += '<div class="wk-card" data-action="view-friend" data-name="'+name+'">'
-        + '<div class="wk-top"><div><div class="wk-date">'+name+'</div><div class="wk-sub">'+theirs.length+' workout'+(theirs.length===1?'':'s')+' logged'+(theirs.length?'':' &middot; no data yet')+'</div></div>'
+        + '<div class="wk-top"><div><div class="wk-date">'+name+'</div><div class="wk-sub">'+friendSubtitle(name)+'</div></div>'
         + '<span class="score-pill" style="background:var(--surface-2); color:var(--text-dim)">'+count7+' this wk</span></div>'
-        + '</div>';
+        + '<div class="wk-actions" style="margin-top:10px;">'
+        + '<button class="btn btn-ghost" data-action="remove-friend" data-id="'+pairKey(state.me,name)+'">Remove</button>'
+        + '</div></div>';
+    });
+    html += '</div>';
+  }
+
+  // Sent requests still waiting
+  const outgoing = outgoingRequests();
+  if(outgoing.length){
+    html += '<div class="section-title">Sent</div><div class="history-list">';
+    outgoing.forEach(function(f){
+      html += '<div class="wk-card"><div class="wk-top"><div><div class="wk-date">'+f.toName+'</div>'
+        + '<div class="wk-sub">request pending</div></div>'
+        + '<button class="btn btn-ghost" style="padding:6px 12px; font-size:12.5px;" data-action="decline-request" data-id="'+f.id+'">Cancel</button>'
+        + '</div></div>';
+    });
+    html += '</div>';
+  }
+
+  // Suggested
+  const suggested = suggestedProfiles();
+  if(suggested.length){
+    html += '<div class="section-title">Suggested</div><div class="history-list">';
+    suggested.forEach(function(name){
+      html += '<div class="wk-card"><div class="wk-top"><div><div class="wk-date">'+name+'</div>'
+        + '<div class="wk-sub">'+friendSubtitle(name)+'</div></div>'
+        + '<button class="btn btn-primary" style="padding:7px 14px; font-size:13px; flex:0 0 auto;" data-action="send-request" data-name="'+name+'">+ Add</button>'
+        + '</div></div>';
     });
     html += '</div>';
   }
@@ -1791,8 +1935,10 @@ function renderTracking(){
 }
 
 function renderTabBar(){
-  function item(view,label,icon){
-    return '<button class="tab-item'+(state.view===view?' active':'')+'" data-action="go-tab" data-view="'+view+'">'+icon+'<span>'+label+'</span></button>';
+  function item(view,label,icon,badge){
+    return '<button class="tab-item'+(state.view===view?' active':'')+'" data-action="go-tab" data-view="'+view+'">'+icon+'<span>'+label+'</span>'
+      + (badge ? '<span class="tab-badge">'+(badge>9?'9+':badge)+'</span>' : '')
+      + '</button>';
   }
   function fabItem(view,label,icon){
     return '<button class="tab-item feed-fab'+(state.view===view?' active':'')+'" data-action="go-tab" data-view="'+view+'"><span class="fab-circle">'+icon+'</span><span>'+label+'</span></button>';
@@ -1807,7 +1953,7 @@ function renderTabBar(){
     + item('tracking','Tracking',trackIcon)
     + fabItem('feed','Feed',feedIcon)
     + item('prs','PRs',prIcon)
-    + item('friends','Friends',friendsIcon)
+    + item('friends','Friends',friendsIcon, incomingRequests().length)
     + '</div>';
 }
 
@@ -2151,6 +2297,33 @@ document.getElementById('app').addEventListener('click', async function(e){
     render();
     saveMyStats({ heightIn:heightIn, weightLb:weightLb, bodyFatPct:bodyFatPct, sex:sex });
   }
+  else if(action==='add-friend-by-name'){
+    const input = document.getElementById('friend-username');
+    const typed = input ? input.value.trim() : '';
+    state.friendMsgOk = false;
+    if(!typed){ state.friendMsg = 'Enter a username first.'; render(); return; }
+    if(norm(typed)===norm(state.me)){ state.friendMsg = "That's you."; render(); return; }
+    const match = profileByName(typed);
+    if(!match){ state.friendMsg = 'No one found with the username "'+typed+'".'; render(); return; }
+    const existing = friendshipWith(match);
+    if(existing){
+      state.friendMsg = existing.status==='accepted'
+        ? 'You and '+match+' are already friends.'
+        : 'There\'s already a pending request with '+match+'.';
+      render(); return;
+    }
+    state.friendMsg = 'Request sent to '+match+'.';
+    state.friendMsgOk = true;
+    render();
+    sendFriendRequest(match);
+  }
+  else if(action==='send-request'){
+    state.friendMsg = null;
+    sendFriendRequest(t.getAttribute('data-name'));
+  }
+  else if(action==='accept-request'){ state.friendMsg = null; respondToRequest(t.getAttribute('data-id'), true); }
+  else if(action==='decline-request'){ state.friendMsg = null; respondToRequest(t.getAttribute('data-id'), false); }
+  else if(action==='remove-friend'){ state.friendMsg = null; removeFriendship(t.getAttribute('data-id')); }
   else if(action==='view-friend'){
     state.viewingFriend = t.getAttribute('data-name');
     refreshScope();
@@ -2192,6 +2365,7 @@ document.getElementById('app').addEventListener('click', async function(e){
     if(state.viewingFriend){ state.viewingFriend=null; refreshScope(); }
     state.view = t.getAttribute('data-view');
     state.historyOpenId = null;
+    state.friendMsg = null;
     render();
   }
   else if(action==='react'){
