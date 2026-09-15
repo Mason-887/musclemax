@@ -257,8 +257,8 @@ a{ color:var(--accent); }
 .body-diagram{ display:flex; justify-content:center; gap:32px; }
 .body-col{ display:flex; flex-direction:column; align-items:center; gap:6px; }
 .body-caption{ font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.6px; font-weight:700; }
-.body-svg{ width:100%; max-width:110px; height:auto; }
-.body-svg rect{ transition:fill .3s; }
+.body-svg{ width:100%; max-width:128px; height:auto; }
+.body-svg path, .body-svg rect, .body-svg ellipse{ transition:fill .3s; }
 
 .group-card-list{ display:flex; flex-direction:column; gap:10px; }
 .group-card{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px 16px; box-shadow:var(--shadow-1); }
@@ -1616,44 +1616,84 @@ function renderPRs(){
 }
 
 /* ---------------- render: tracking ---------------- */
+/* Rounded-corner trapezoid path — the building block for every tapered
+   limb/torso shape below (wide at one end, narrower at the other),
+   which is what makes the figure read as an actual body instead of a
+   row of pills. */
+function bodyTrap(cx1,y1,w1,cx2,y2,w2,r){
+  r = r||6;
+  const topL=cx1-w1/2, topR=cx1+w1/2, botL=cx2-w2/2, botR=cx2+w2/2;
+  return 'M'+(topL+r)+','+y1
+    +' L'+(topR-r)+','+y1
+    +' Q'+topR+','+y1+' '+topR+','+(y1+r)
+    +' L'+botR+','+(y2-r)
+    +' Q'+botR+','+y2+' '+(botR-r)+','+y2
+    +' L'+(botL+r)+','+y2
+    +' Q'+botL+','+y2+' '+botL+','+(y2-r)
+    +' L'+topL+','+(y1+r)
+    +' Q'+topL+','+y1+' '+(topL+r)+','+y1
+    +' Z';
+}
 function bodyDiagramSvg(){
   const g = {};
   GROUP_ORDER.forEach(function(grp){ g[grp] = groupStrain(grp,7); });
   function c(grp){ return strainColor(g[grp]); }
+  function glow(grp){ return (g[grp]!==null && g[grp]>=67) ? ' filter="url(#bodyGlow)"' : ''; }
   function t(grp){ const s=g[grp]; return grp+': '+(s===null?'not trained this week':s+'/100 strain'); }
+  function region(d, grp){ return '<path d="'+d+'" fill="'+c(grp)+'"'+glow(grp)+'><title>'+t(grp)+'</title></path>'; }
+  function mirror(x){ return 200-x; }
+  const defs = '<defs><filter id="bodyGlow" x="-60%" y="-60%" width="220%" height="220%">'
+    + '<feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>'
+    + '</filter></defs>';
+  const neutral = 'var(--surface-2)';
   function fig(regions){
-    return '<svg class="body-svg" viewBox="0 0 160 260" xmlns="http://www.w3.org/2000/svg">'
-      + '<circle cx="80" cy="24" r="18" fill="var(--surface-2)" stroke="var(--border)" stroke-width="1.5"/>'
-      + regions
-      + '</svg>';
+    return '<svg class="body-svg" viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">' + defs + regions + '</svg>';
   }
-  const front = fig(
-      '<rect x="40" y="46" width="18" height="34" rx="9" fill="'+c('Shoulders')+'"><title>'+t('Shoulders')+'</title></rect>'
-    + '<rect x="102" y="46" width="18" height="34" rx="9" fill="'+c('Shoulders')+'"><title>'+t('Shoulders')+'</title></rect>'
-    + '<rect x="55" y="50" width="50" height="60" rx="10" fill="'+c('Chest')+'"><title>'+t('Chest')+'</title></rect>'
-    + '<rect x="30" y="82" width="16" height="70" rx="8" fill="'+c('Biceps')+'"><title>'+t('Biceps')+'</title></rect>'
-    + '<rect x="114" y="82" width="16" height="70" rx="8" fill="'+c('Biceps')+'"><title>'+t('Biceps')+'</title></rect>'
-    + '<rect x="58" y="112" width="44" height="44" rx="8" fill="'+c('Core')+'"><title>'+t('Core')+'</title></rect>'
-    + '<rect x="56" y="160" width="20" height="55" rx="9" fill="'+c('Quads')+'"><title>'+t('Quads')+'</title></rect>'
-    + '<rect x="84" y="160" width="20" height="55" rx="9" fill="'+c('Quads')+'"><title>'+t('Quads')+'</title></rect>'
-    + '<rect x="56" y="218" width="20" height="22" rx="6" fill="'+c('Calves')+'"><title>'+t('Calves')+'</title></rect>'
-    + '<rect x="84" y="218" width="20" height="22" rx="6" fill="'+c('Calves')+'"><title>'+t('Calves')+'</title></rect>'
-  );
-  const back = fig(
-      '<rect x="40" y="46" width="18" height="34" rx="9" fill="'+c('Shoulders')+'"><title>'+t('Shoulders')+'</title></rect>'
-    + '<rect x="102" y="46" width="18" height="34" rx="9" fill="'+c('Shoulders')+'"><title>'+t('Shoulders')+'</title></rect>'
-    + '<rect x="52" y="50" width="56" height="66" rx="10" fill="'+c('Back')+'"><title>'+t('Back')+'</title></rect>'
-    + '<rect x="30" y="82" width="16" height="70" rx="8" fill="'+c('Triceps')+'"><title>'+t('Triceps')+'</title></rect>'
-    + '<rect x="114" y="82" width="16" height="70" rx="8" fill="'+c('Triceps')+'"><title>'+t('Triceps')+'</title></rect>'
-    + '<rect x="58" y="118" width="44" height="38" rx="8" fill="'+c('Glutes')+'"><title>'+t('Glutes')+'</title></rect>'
-    + '<rect x="56" y="160" width="20" height="55" rx="9" fill="'+c('Hamstrings')+'"><title>'+t('Hamstrings')+'</title></rect>'
-    + '<rect x="84" y="160" width="20" height="55" rx="9" fill="'+c('Hamstrings')+'"><title>'+t('Hamstrings')+'</title></rect>'
-    + '<rect x="56" y="218" width="20" height="22" rx="6" fill="'+c('Calves')+'"><title>'+t('Calves')+'</title></rect>'
-    + '<rect x="84" y="218" width="20" height="22" rx="6" fill="'+c('Calves')+'"><title>'+t('Calves')+'</title></rect>'
-  );
+  const baseParts = function(){
+    return '<path d="'+bodyTrap(100,40,20,100,58,26,4)+'" fill="'+neutral+'"/>'
+    + '<path d="'+bodyTrap(40,168,15,36,232,11,5)+'" fill="'+neutral+'"/>'
+    + '<path d="'+bodyTrap(mirror(40),168,15,mirror(36),232,11,5)+'" fill="'+neutral+'"/>'
+    + '<ellipse cx="34" cy="240" rx="8" ry="10" fill="'+neutral+'"/>'
+    + '<ellipse cx="'+mirror(34)+'" cy="240" rx="8" ry="10" fill="'+neutral+'"/>'
+    + '<ellipse cx="100" cy="20" rx="16" ry="18" fill="'+neutral+'"/>';
+  };
+  const frontRegions =
+      baseParts()
+    + '<ellipse cx="52" cy="66" rx="18" ry="20" fill="'+c('Shoulders')+'"'+glow('Shoulders')+'><title>'+t('Shoulders')+'</title></ellipse>'
+    + '<ellipse cx="'+mirror(52)+'" cy="66" rx="18" ry="20" fill="'+c('Shoulders')+'"'+glow('Shoulders')+'><title>'+t('Shoulders')+'</title></ellipse>'
+    + '<g transform="rotate(-8 82 88)">'+region(bodyTrap(82,64,46,82,110,30,10),'Chest')+'</g>'
+    + '<g transform="rotate(8 '+mirror(82)+' 88)">'+region(bodyTrap(mirror(82),64,46,mirror(82),110,30,10),'Chest')+'</g>'
+    + region(bodyTrap(40,86,20,38,168,14,7),'Biceps')
+    + region(bodyTrap(mirror(40),86,20,mirror(38),168,14,7),'Biceps')
+    + '<path d="'+bodyTrap(100,150,66,100,206,92,16)+'" fill="'+neutral+'"/>'
+    + [112,132,152].map(function(y){
+        return '<rect x="86" y="'+y+'" width="12" height="16" rx="4" fill="'+c('Core')+'"'+glow('Core')+'><title>'+t('Core')+'</title></rect>'
+          + '<rect x="102" y="'+y+'" width="12" height="16" rx="4" fill="'+c('Core')+'"'+glow('Core')+'><title>'+t('Core')+'</title></rect>';
+      }).join('')
+    + '<ellipse cx="74" cy="322" rx="13" ry="9" fill="'+neutral+'"/>'
+    + '<ellipse cx="'+mirror(74)+'" cy="322" rx="13" ry="9" fill="'+neutral+'"/>'
+    + region(bodyTrap(74,200,34,68,318,24,10),'Quads')
+    + region(bodyTrap(mirror(74),200,34,mirror(68),318,24,10),'Quads')
+    + region(bodyTrap(74,330,20,74,368,15,6),'Calves')
+    + region(bodyTrap(mirror(74),330,20,mirror(74),368,15,6),'Calves');
+  const backRegions =
+      baseParts()
+    + '<ellipse cx="52" cy="66" rx="18" ry="20" fill="'+c('Shoulders')+'"'+glow('Shoulders')+'><title>'+t('Shoulders')+'</title></ellipse>'
+    + '<ellipse cx="'+mirror(52)+'" cy="66" rx="18" ry="20" fill="'+c('Shoulders')+'"'+glow('Shoulders')+'><title>'+t('Shoulders')+'</title></ellipse>'
+    + region(bodyTrap(100,60,72,100,150,46,14),'Back')
+    + region(bodyTrap(40,86,20,38,168,14,7),'Triceps')
+    + region(bodyTrap(mirror(40),86,20,mirror(38),168,14,7),'Triceps')
+    + '<g transform="rotate(-6 78 168)"><ellipse cx="78" cy="168" rx="20" ry="24" fill="'+c('Glutes')+'"'+glow('Glutes')+'><title>'+t('Glutes')+'</title></ellipse></g>'
+    + '<g transform="rotate(6 122 168)"><ellipse cx="122" cy="168" rx="20" ry="24" fill="'+c('Glutes')+'"'+glow('Glutes')+'><title>'+t('Glutes')+'</title></ellipse></g>'
+    + '<ellipse cx="74" cy="322" rx="13" ry="9" fill="'+neutral+'"/>'
+    + '<ellipse cx="'+mirror(74)+'" cy="322" rx="13" ry="9" fill="'+neutral+'"/>'
+    + region(bodyTrap(74,200,34,68,318,24,10),'Hamstrings')
+    + region(bodyTrap(mirror(74),200,34,mirror(68),318,24,10),'Hamstrings')
+    + region(bodyTrap(74,330,22,74,368,15,8),'Calves')
+    + region(bodyTrap(mirror(74),330,22,mirror(74),368,15,8),'Calves');
   return '<div class="body-diagram">'
-    + '<div class="body-col"><div class="body-caption">Front</div>'+front+'</div>'
-    + '<div class="body-col"><div class="body-caption">Back</div>'+back+'</div>'
+    + '<div class="body-col"><div class="body-caption">Front</div>'+fig(frontRegions)+'</div>'
+    + '<div class="body-col"><div class="body-caption">Back</div>'+fig(backRegions)+'</div>'
     + '</div>';
 }
 function renderVolumeBars(){
