@@ -114,6 +114,11 @@ a{ color:var(--accent); }
 
 /* ---- Gauge card ---- */
 .gauge-card{ background:var(--surface); border:1px solid var(--border); border-radius:18px; padding:20px 20px 16px; box-shadow:var(--shadow-1); }
+.body-diagram-card{ background:radial-gradient(120% 140% at 30% 0%, #232838, #14161d); border:1px solid #2a2f3d; border-radius:18px; padding:20px 20px 18px; box-shadow:var(--shadow-1); }
+.body-diagram-label{ font-size:12px; text-transform:uppercase; letter-spacing:1.2px; color:#8b93a5; font-weight:600; margin-bottom:14px; }
+.body-legend-dark{ display:flex; flex-wrap:wrap; gap:12px; justify-content:center; margin-top:16px; }
+.body-legend-dark .cal-legend-item{ color:#8b93a5; }
+.body-legend-dark .dot{ width:8px; height:8px; border-radius:50%; display:inline-block; }
 .gauge-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:2px; }
 .gauge-label{ font-size:12px; text-transform:uppercase; letter-spacing:1.2px; color:var(--text-dim); font-weight:600; }
 .gauge-wrap{ position:relative; display:flex; justify-content:center; }
@@ -256,7 +261,7 @@ a{ color:var(--accent); }
 
 .body-diagram{ display:flex; justify-content:center; gap:32px; }
 .body-col{ display:flex; flex-direction:column; align-items:center; gap:6px; }
-.body-caption{ font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.6px; font-weight:700; }
+.body-caption{ font-size:10.5px; color:#8b93a5; text-transform:uppercase; letter-spacing:0.6px; font-weight:700; }
 .body-svg{ width:100%; max-width:128px; height:auto; }
 .body-svg path, .body-svg rect, .body-svg ellipse{ transition:fill .3s; }
 
@@ -1664,25 +1669,36 @@ const BODY_SHAPES = {
   CALF_B:   [[30,320],[36,338],[28,364],[14,386],[2,380],[0,348],[6,324],[16,314]],
   OBLIQUE:  [[28,120],[42,134],[40,160],[28,174],[16,168],[14,140],[20,124]]
 };
+/* Continuous green -> yellow -> orange -> red heat gradient (like a
+   real muscle-recovery heatmap) instead of a 3-bucket palette — every
+   point score gets its own shade rather than snapping between a
+   handful of fixed colors. Only used for this diagram; the rest of
+   the app keeps strainColor()'s bucketed palette. */
+function diagramHeatColor(score){
+  if(score===null) return '#2f3444';
+  const hue = 128 - clamp(score,0,100)*1.28;
+  const light = 46 + (score/100)*6;
+  return 'hsl('+hue.toFixed(0)+', 80%, '+light.toFixed(0)+'%)';
+}
 function bodyDiagramSvg(){
   const g = {};
   GROUP_ORDER.forEach(function(grp){ g[grp] = groupStrain(grp,7); });
-  function c(grp){ return strainColor(g[grp]); }
+  function c(grp){ return diagramHeatColor(g[grp]); }
   function glow(grp){ return (g[grp]!==null && g[grp]>=67) ? ' filter="url(#bodyGlow)"' : ''; }
   function t(grp){ const s=g[grp]; return grp+': '+(s===null?'not trained this week':s+'/100 strain'); }
   function side(s, raw){ return raw.map(function(p){ return [100+s*p[0], p[1]]; }); }
   function mirror(x){ return 200-x; }
   function region(pts, grp){
     const d = bodySmooth(pts);
-    return '<path d="'+d+'" fill="'+c(grp)+'" stroke="rgba(20,20,30,.22)" stroke-width="1.2" stroke-linejoin="round"'+glow(grp)+'><title>'+t(grp)+'</title></path>'
+    return '<path d="'+d+'" fill="'+c(grp)+'" stroke="rgba(0,0,0,.4)" stroke-width="1.2" stroke-linejoin="round"'+glow(grp)+'><title>'+t(grp)+'</title></path>'
       + '<path d="'+d+'" fill="url(#bodySheen)" pointer-events="none"/>';
   }
   const defs = '<defs>'
-    + '<filter id="bodyGlow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
-    + '<linearGradient id="bodySheen" x1="0" y1="0" x2="0.7" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.32"/><stop offset="0.6" stop-color="#fff" stop-opacity="0"/></linearGradient>'
+    + '<filter id="bodyGlow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="3.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
+    + '<linearGradient id="bodySheen" x1="0" y1="0" x2="0.7" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.28"/><stop offset="0.6" stop-color="#fff" stop-opacity="0"/></linearGradient>'
     + '</defs>';
-  const neutral = 'var(--surface-2)';
-  const strokeN = ' stroke="var(--border)" stroke-width="1"';
+  const neutral = '#2f3444';
+  const strokeN = ' stroke="#3d4457" stroke-width="1"';
   function fig(regions){
     return '<svg class="body-svg" viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">' + defs + regions + '</svg>';
   }
@@ -1708,8 +1724,8 @@ function bodyDiagramSvg(){
     + region(L(BODY_SHAPES.OBLIQUE),'Core') + region(R(BODY_SHAPES.OBLIQUE),'Core')
     + [112,131,150].map(function(y,i){
         const w = 13-i;
-        return '<rect x="'+(99-w-2)+'" y="'+y+'" width="'+w+'" height="16" rx="4" fill="'+c('Core')+'"'+glow('Core')+' stroke="rgba(20,20,30,.22)" stroke-width="1"><title>'+t('Core')+'</title></rect>'
-          + '<rect x="'+(101+2)+'" y="'+y+'" width="'+w+'" height="16" rx="4" fill="'+c('Core')+'"'+glow('Core')+' stroke="rgba(20,20,30,.22)" stroke-width="1"><title>'+t('Core')+'</title></rect>';
+        return '<rect x="'+(99-w-2)+'" y="'+y+'" width="'+w+'" height="16" rx="4" fill="'+c('Core')+'"'+glow('Core')+' stroke="rgba(0,0,0,.4)" stroke-width="1"><title>'+t('Core')+'</title></rect>'
+          + '<rect x="'+(101+2)+'" y="'+y+'" width="'+w+'" height="16" rx="4" fill="'+c('Core')+'"'+glow('Core')+' stroke="rgba(0,0,0,.4)" stroke-width="1"><title>'+t('Core')+'</title></rect>';
       }).join('')
     + region(L(BODY_SHAPES.QUAD),'Quads') + region(R(BODY_SHAPES.QUAD),'Quads')
     + region(L(BODY_SHAPES.CALF_F),'Calves') + region(R(BODY_SHAPES.CALF_F),'Calves')
@@ -1833,14 +1849,14 @@ function renderCardioRanking(){
 }
 function renderTracking(){
   let html = '<div class="topbar"><h1 style="font-size:19px; font-weight:800;">Tracking</h1></div>';
-  html += '<div class="gauge-card" style="padding:20px;">'
-    + '<div class="gauge-label" style="margin-bottom:14px">Muscle Strain &middot; Last 7 Days</div>'
+  html += '<div class="body-diagram-card">'
+    + '<div class="body-diagram-label">Muscle Strain &middot; Last 7 Days</div>'
     + bodyDiagramSvg()
-    + '<div class="cal-legend" style="margin-top:16px; justify-content:center;">'
-    +   '<span class="cal-legend-item"><i class="dot" style="background:var(--surface-2)"></i>None</span>'
-    +   '<span class="cal-legend-item"><i class="dot" style="background:var(--accent)"></i>Light</span>'
-    +   '<span class="cal-legend-item"><i class="dot" style="background:var(--warn)"></i>Moderate</span>'
-    +   '<span class="cal-legend-item"><i class="dot" style="background:var(--bad)"></i>High</span>'
+    + '<div class="body-legend-dark">'
+    +   '<span class="cal-legend-item"><i class="dot" style="background:#3a4152"></i>None</span>'
+    +   '<span class="cal-legend-item"><i class="dot" style="background:hsl(120,75%,50%)"></i>Light</span>'
+    +   '<span class="cal-legend-item"><i class="dot" style="background:hsl(60,85%,50%)"></i>Moderate</span>'
+    +   '<span class="cal-legend-item"><i class="dot" style="background:hsl(6,85%,55%)"></i>High</span>'
     + '</div></div>';
   html += scoreTrendSvg();
   html += renderCardioRanking();
