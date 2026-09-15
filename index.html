@@ -1622,9 +1622,12 @@ function renderPRs(){
 
 /* ---------------- render: tracking ---------------- */
 /* Smooth closed spline through a handful of rough anchor points
-   (Catmull-Rom -> cubic Bezier) — every muscle shape below is defined
-   as ~8 loose points and turned into an organic, anatomically-tapered
-   blob by this, rather than hand-tuned bezier control points. */
+   (Catmull-Rom -> cubic Bezier) — used to build exactly THREE clean
+   silhouette outlines (torso, one leg, one arm). Muscle zones are then
+   painted as plain rects clipped to those outlines, so every zone's
+   outer edge is always the same smooth body line — no seams, no
+   separately-drawn blobs that can drift out of alignment with each
+   other the way the old per-muscle shapes did. */
 function bodySmooth(pts){
   const n = pts.length;
   function get(i){ return pts[(i+n)%n]; }
@@ -1637,38 +1640,17 @@ function bodySmooth(pts){
   }
   return d+' Z';
 }
-/* Rounded-corner trapezoid — used only for the untracked neutral parts
-   (neck, waist, knees) where a soft taper is enough; tracked muscles
-   use bodySmooth for real organic contours. */
-function bodyTrap(cx1,y1,w1,cx2,y2,w2,r){
-  r = r||6;
-  const topL=cx1-w1/2, topR=cx1+w1/2, botL=cx2-w2/2, botR=cx2+w2/2;
-  return 'M'+(topL+r)+','+y1
-    +' L'+(topR-r)+','+y1
-    +' Q'+topR+','+y1+' '+topR+','+(y1+r)
-    +' L'+botR+','+(y2-r)
-    +' Q'+botR+','+y2+' '+(botR-r)+','+y2
-    +' L'+(botL+r)+','+y2
-    +' Q'+botL+','+y2+' '+botL+','+(y2-r)
-    +' L'+topL+','+(y1+r)
-    +' Q'+topL+','+y1+' '+(topL+r)+','+y1
-    +' Z';
-}
-// Rough anchor points for each muscle, as (offset-from-body-centerline, y) — mirrored per side.
-const BODY_SHAPES = {
-  SHOULDER: [[64,54],[50,46],[36,50],[28,64],[30,80],[42,90],[56,86],[64,72]],
-  CHEST:    [[4,60],[24,52],[42,60],[46,76],[40,96],[28,110],[14,112],[4,98],[2,76]],
-  BICEP:    [[50,90],[64,94],[70,112],[66,136],[58,158],[50,166],[44,156],[42,130],[44,104]],
-  TRICEP:   [[50,90],[62,96],[68,118],[64,142],[56,160],[48,168],[42,156],[41,130],[44,104]],
-  FOREARM:  [[46,166],[50,188],[47,212],[41,230],[33,236],[29,218],[31,192],[37,168]],
-  BACK:     [[8,62],[36,66],[46,90],[44,126],[36,152],[20,168],[6,170],[2,140],[4,90],[2,68]],
-  GLUTE:    [[4,146],[20,142],[32,156],[34,178],[24,196],[8,198],[0,184],[0,160]],
-  QUAD:     [[44,196],[42,230],[36,268],[28,300],[16,316],[6,310],[2,272],[6,228],[12,198]],
-  HAM:      [[44,196],[40,230],[34,268],[24,300],[14,314],[4,308],[2,270],[6,228],[12,198]],
-  CALF_F:   [[28,320],[32,340],[26,364],[14,384],[4,380],[2,352],[8,326],[16,316]],
-  CALF_B:   [[30,320],[36,338],[28,364],[14,386],[2,380],[0,348],[6,324],[16,314]],
-  OBLIQUE:  [[28,120],[42,134],[40,160],[28,174],[16,168],[14,140],[20,124]]
-};
+// Three silhouette outlines, each as rough anchor points smoothed by
+// bodySmooth: TORSO (right-side profile, neck to hip — mirrored to
+// close the loop), LEG (one thigh-to-ankle taper), ARM (one
+// shoulder-to-wrist taper). Every muscle is just a plain rect painted
+// through a clip-path built from one of these three, so nothing can
+// visually drift apart from the body outline the way separately-drawn
+// blobs could.
+const TORSO_RIGHT = [[10,42],[46,58],[44,90],[36,130],[26,152],[34,172],[32,186]];
+const TORSO_PTS = TORSO_RIGHT.concat(TORSO_RIGHT.slice().reverse().map(function(p){ return [-p[0],p[1]]; }));
+const LEG_PTS = [[15,184],[17,220],[15,260],[11,295],[9,320],[10,345],[7,368],[2,384],[-3,384],[-7,368],[-9,345],[-8,320],[-9,295],[-13,260],[-15,220],[-14,184]];
+const ARM_PTS = [[14,60],[15,90],[13,120],[10,150],[8,175],[9,200],[6,222],[2,235],[-2,235],[-6,222],[-8,200],[-9,175],[-11,150],[-14,120],[-16,90],[-15,60]];
 /* Continuous green -> yellow -> orange -> red heat gradient (like a
    real muscle-recovery heatmap) instead of a 3-bucket palette — every
    point score gets its own shade rather than snapping between a
@@ -1686,57 +1668,61 @@ function bodyDiagramSvg(){
   function c(grp){ return diagramHeatColor(g[grp]); }
   function glow(grp){ return (g[grp]!==null && g[grp]>=67) ? ' filter="url(#bodyGlow)"' : ''; }
   function t(grp){ const s=g[grp]; return grp+': '+(s===null?'not trained this week':s+'/100 strain'); }
-  function side(s, raw){ return raw.map(function(p){ return [100+s*p[0], p[1]]; }); }
-  function mirror(x){ return 200-x; }
-  function region(pts, grp){
-    const d = bodySmooth(pts);
-    return '<path d="'+d+'" fill="'+c(grp)+'" stroke="rgba(0,0,0,.4)" stroke-width="1.2" stroke-linejoin="round"'+glow(grp)+'><title>'+t(grp)+'</title></path>'
-      + '<path d="'+d+'" fill="url(#bodySheen)" pointer-events="none"/>';
-  }
+  function offset(cx, pts){ return pts.map(function(p){ return [cx+p[0], p[1]]; }); }
+  const neutral = '#2f3444', edgeLight = '#3d4457';
+  const torsoPts = offset(100, TORSO_PTS);
+  const legPts = { L: offset(74, LEG_PTS), R: offset(126, LEG_PTS) };
+  const armPts = { L: offset(50, ARM_PTS), R: offset(150, ARM_PTS) };
   const defs = '<defs>'
+    + '<clipPath id="clipTorso"><path d="'+bodySmooth(torsoPts)+'"/></clipPath>'
+    + '<clipPath id="clipLegL"><path d="'+bodySmooth(legPts.L)+'"/></clipPath>'
+    + '<clipPath id="clipLegR"><path d="'+bodySmooth(legPts.R)+'"/></clipPath>'
+    + '<clipPath id="clipArmL"><path d="'+bodySmooth(armPts.L)+'"/></clipPath>'
+    + '<clipPath id="clipArmR"><path d="'+bodySmooth(armPts.R)+'"/></clipPath>'
     + '<filter id="bodyGlow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="3.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
-    + '<linearGradient id="bodySheen" x1="0" y1="0" x2="0.7" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.28"/><stop offset="0.6" stop-color="#fff" stop-opacity="0"/></linearGradient>'
+    + '<linearGradient id="bodySheen" x1="0" y1="0" x2="0.7" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.22"/><stop offset="0.6" stop-color="#fff" stop-opacity="0"/></linearGradient>'
     + '</defs>';
-  const neutral = '#2f3444';
-  const strokeN = ' stroke="#3d4457" stroke-width="1"';
+  function zone(x,y,w,h,clipId,grp){
+    return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" clip-path="url(#'+clipId+')" fill="'+c(grp)+'"'+glow(grp)+'><title>'+t(grp)+'</title></rect>'
+      + '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" clip-path="url(#'+clipId+')" fill="url(#bodySheen)" pointer-events="none"/>';
+  }
+  function outline(pts, clipId){
+    return '<path d="'+bodySmooth(pts)+'" fill="none" stroke="'+edgeLight+'" stroke-width="1.3" clip-path="url(#'+clipId+')"/>'
+      + '<path d="'+bodySmooth(pts)+'" fill="none" stroke="rgba(0,0,0,.35)" stroke-width="1.3"/>';
+  }
   function fig(regions){
-    return '<svg class="body-svg" viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">' + defs + regions + '</svg>';
+    return '<svg class="body-svg" viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">' + defs
+      + '<ellipse cx="100" cy="20" rx="15" ry="17" fill="'+neutral+'" stroke="'+edgeLight+'"/>'
+      + '<path d="M90,40 L110,40 L107,56 L93,56 Z" fill="'+neutral+'"/>'
+      + regions
+      + '<circle cx="50" cy="234" r="9" fill="'+neutral+'" stroke="'+edgeLight+'"/>'
+      + '<circle cx="150" cy="234" r="9" fill="'+neutral+'" stroke="'+edgeLight+'"/>'
+      + '<ellipse cx="74" cy="388" rx="12" ry="7" fill="'+neutral+'" stroke="'+edgeLight+'"/>'
+      + '<ellipse cx="126" cy="388" rx="12" ry="7" fill="'+neutral+'" stroke="'+edgeLight+'"/>'
+      + '</svg>';
   }
-  function baseCore(){
-    return '<path d="'+bodyTrap(100,40,20,100,58,26,4)+'" fill="'+neutral+'"'+strokeN+'/>'
-      + '<ellipse cx="100" cy="20" rx="16" ry="18" fill="'+neutral+'"'+strokeN+'/>'
-      + '<path d="'+bodyTrap(100,150,58,100,200,88,16)+'" fill="'+neutral+'"/>'
-      + '<ellipse cx="82" cy="316" rx="13" ry="9" fill="'+neutral+'"/>'
-      + '<ellipse cx="'+mirror(82)+'" cy="316" rx="13" ry="9" fill="'+neutral+'"/>';
+  function legZones(topGrp, botGrp){
+    return zone(58,184,32,126,'clipLegL',topGrp) + zone(58,310,32,80,'clipLegL',botGrp) + outline(legPts.L,'clipLegL')
+      + zone(110,184,32,126,'clipLegR',topGrp) + zone(110,310,32,80,'clipLegR',botGrp) + outline(legPts.R,'clipLegR');
   }
-  function arms(armGrp, side1, side2){
-    return region(side1(BODY_SHAPES[armGrp]),armGrp==='TRICEP'?'Triceps':'Biceps')
-      + region(side2(BODY_SHAPES[armGrp]),armGrp==='TRICEP'?'Triceps':'Biceps')
-      + '<path d="'+bodySmooth(side1(BODY_SHAPES.FOREARM))+'" fill="'+neutral+'"'+strokeN+'/>'
-      + '<path d="'+bodySmooth(side2(BODY_SHAPES.FOREARM))+'" fill="'+neutral+'"'+strokeN+'/>'
-      + '<ellipse cx="67" cy="238" rx="9" ry="11" fill="'+neutral+'"'+strokeN+'/>'
-      + '<ellipse cx="133" cy="238" rx="9" ry="11" fill="'+neutral+'"'+strokeN+'/>';
+  function armZones(grp){
+    return zone(30,58,44,180,'clipArmL',grp) + outline(armPts.L,'clipArmL')
+      + zone(126,58,44,180,'clipArmR',grp) + outline(armPts.R,'clipArmR');
   }
-  const L = function(raw){ return side(-1,raw); }, R = function(raw){ return side(1,raw); };
-  const frontRegions = baseCore()
-    + region(L(BODY_SHAPES.SHOULDER),'Shoulders') + region(R(BODY_SHAPES.SHOULDER),'Shoulders')
-    + region(L(BODY_SHAPES.CHEST),'Chest') + region(R(BODY_SHAPES.CHEST),'Chest')
-    + region(L(BODY_SHAPES.OBLIQUE),'Core') + region(R(BODY_SHAPES.OBLIQUE),'Core')
-    + [112,131,150].map(function(y,i){
-        const w = 13-i;
-        return '<rect x="'+(99-w-2)+'" y="'+y+'" width="'+w+'" height="16" rx="4" fill="'+c('Core')+'"'+glow('Core')+' stroke="rgba(0,0,0,.4)" stroke-width="1"><title>'+t('Core')+'</title></rect>'
-          + '<rect x="'+(101+2)+'" y="'+y+'" width="'+w+'" height="16" rx="4" fill="'+c('Core')+'"'+glow('Core')+' stroke="rgba(0,0,0,.4)" stroke-width="1"><title>'+t('Core')+'</title></rect>';
-      }).join('')
-    + region(L(BODY_SHAPES.QUAD),'Quads') + region(R(BODY_SHAPES.QUAD),'Quads')
-    + region(L(BODY_SHAPES.CALF_F),'Calves') + region(R(BODY_SHAPES.CALF_F),'Calves')
-    + arms('BICEP', L, R);
-  const backRegions = baseCore()
-    + region(L(BODY_SHAPES.SHOULDER),'Shoulders') + region(R(BODY_SHAPES.SHOULDER),'Shoulders')
-    + region(L(BODY_SHAPES.BACK),'Back') + region(R(BODY_SHAPES.BACK),'Back')
-    + region(L(BODY_SHAPES.GLUTE),'Glutes') + region(R(BODY_SHAPES.GLUTE),'Glutes')
-    + region(L(BODY_SHAPES.HAM),'Hamstrings') + region(R(BODY_SHAPES.HAM),'Hamstrings')
-    + region(L(BODY_SHAPES.CALF_B),'Calves') + region(R(BODY_SHAPES.CALF_B),'Calves')
-    + arms('TRICEP', L, R);
+  const frontRegions =
+      zone(24,40,152,90,'clipTorso','Shoulders')
+    + zone(30,112,140,74,'clipTorso','Core')
+    + zone(60,58,80,54,'clipTorso','Chest')
+    + outline(torsoPts,'clipTorso')
+    + legZones('Quads','Calves')
+    + armZones('Biceps');
+  const backRegions =
+      zone(24,40,152,90,'clipTorso','Shoulders')
+    + zone(55,58,90,132,'clipTorso','Back')
+    + zone(60,150,80,40,'clipTorso','Glutes')
+    + outline(torsoPts,'clipTorso')
+    + legZones('Hamstrings','Calves')
+    + armZones('Triceps');
   return '<div class="body-diagram">'
     + '<div class="body-col"><div class="body-caption">Front</div>'+fig(frontRegions)+'</div>'
     + '<div class="body-col"><div class="body-caption">Back</div>'+fig(backRegions)+'</div>'
