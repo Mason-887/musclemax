@@ -355,23 +355,23 @@ const EXERCISES = [
   {id:'straight_arm_pulldown', name:'Straight-Arm Pulldown', group:'Back', type:'isolation', repLow:10, repHigh:15},
   {id:'face_pull', name:'Face Pull', group:'Back', type:'isolation', repLow:12, repHigh:18},
   // Legs
-  {id:'back_squat', name:'Back Squat', group:'Legs', type:'compound', repLow:4, repHigh:8},
-  {id:'front_squat', name:'Front Squat', group:'Legs', type:'compound', repLow:4, repHigh:8},
-  {id:'goblet_squat', name:'Goblet Squat', group:'Legs', type:'compound', repLow:8, repHigh:12},
-  {id:'hack_squat', name:'Hack Squat', group:'Legs', type:'compound', repLow:8, repHigh:12},
-  {id:'rdl', name:'Romanian Deadlift', group:'Legs', type:'compound', repLow:6, repHigh:10},
-  {id:'stiff_leg_deadlift', name:'Stiff-Leg Deadlift', group:'Legs', type:'compound', repLow:6, repHigh:10},
-  {id:'leg_press', name:'Leg Press', group:'Legs', type:'compound', repLow:8, repHigh:12},
-  {id:'bulgarian_split_squat', name:'Bulgarian Split Squat', group:'Legs', type:'compound', repLow:8, repHigh:12},
-  {id:'walking_lunge', name:'Walking Lunge', group:'Legs', type:'compound', repLow:8, repHigh:12},
-  {id:'reverse_lunge', name:'Reverse Lunge', group:'Legs', type:'compound', repLow:8, repHigh:12},
-  {id:'leg_extension', name:'Leg Extension', group:'Legs', type:'isolation', repLow:10, repHigh:15},
-  {id:'lying_leg_curl', name:'Lying Leg Curl', group:'Legs', type:'isolation', repLow:10, repHigh:15},
-  {id:'seated_leg_curl', name:'Seated Leg Curl', group:'Legs', type:'isolation', repLow:10, repHigh:15},
-  {id:'hip_thrust', name:'Barbell Hip Thrust', group:'Legs', type:'compound', repLow:6, repHigh:10},
-  {id:'glute_bridge', name:'Glute Bridge', group:'Legs', type:'isolation', repLow:10, repHigh:15},
-  {id:'standing_calf_raise', name:'Standing Calf Raise', group:'Legs', type:'isolation', repLow:10, repHigh:15},
-  {id:'seated_calf_raise', name:'Seated Calf Raise', group:'Legs', type:'isolation', repLow:10, repHigh:15},
+  {id:'back_squat', name:'Back Squat', group:'Quads', type:'compound', repLow:4, repHigh:8},
+  {id:'front_squat', name:'Front Squat', group:'Quads', type:'compound', repLow:4, repHigh:8},
+  {id:'goblet_squat', name:'Goblet Squat', group:'Quads', type:'compound', repLow:8, repHigh:12},
+  {id:'hack_squat', name:'Hack Squat', group:'Quads', type:'compound', repLow:8, repHigh:12},
+  {id:'rdl', name:'Romanian Deadlift', group:'Hamstrings', type:'compound', repLow:6, repHigh:10},
+  {id:'stiff_leg_deadlift', name:'Stiff-Leg Deadlift', group:'Hamstrings', type:'compound', repLow:6, repHigh:10},
+  {id:'leg_press', name:'Leg Press', group:'Quads', type:'compound', repLow:8, repHigh:12},
+  {id:'bulgarian_split_squat', name:'Bulgarian Split Squat', group:'Quads', type:'compound', repLow:8, repHigh:12},
+  {id:'walking_lunge', name:'Walking Lunge', group:'Quads', type:'compound', repLow:8, repHigh:12},
+  {id:'reverse_lunge', name:'Reverse Lunge', group:'Quads', type:'compound', repLow:8, repHigh:12},
+  {id:'leg_extension', name:'Leg Extension', group:'Quads', type:'isolation', repLow:10, repHigh:15},
+  {id:'lying_leg_curl', name:'Lying Leg Curl', group:'Hamstrings', type:'isolation', repLow:10, repHigh:15},
+  {id:'seated_leg_curl', name:'Seated Leg Curl', group:'Hamstrings', type:'isolation', repLow:10, repHigh:15},
+  {id:'hip_thrust', name:'Barbell Hip Thrust', group:'Glutes', type:'compound', repLow:6, repHigh:10},
+  {id:'glute_bridge', name:'Glute Bridge', group:'Glutes', type:'isolation', repLow:10, repHigh:15},
+  {id:'standing_calf_raise', name:'Standing Calf Raise', group:'Calves', type:'isolation', repLow:10, repHigh:15},
+  {id:'seated_calf_raise', name:'Seated Calf Raise', group:'Calves', type:'isolation', repLow:10, repHigh:15},
   // Shoulders
   {id:'ohp', name:'Overhead Press', group:'Shoulders', type:'compound', repLow:5, repHigh:8},
   {id:'seated_db_press', name:'Seated Dumbbell Shoulder Press', group:'Shoulders', type:'compound', repLow:8, repHigh:12},
@@ -424,15 +424,15 @@ const EXERCISES = [
   {id:'snatch_grip_deadlift', name:'Snatch-Grip Deadlift', group:'Back', type:'compound', repLow:3, repHigh:6},
   {id:'trap_bar_deadlift', name:'Trap Bar Deadlift', group:'Back', type:'compound', repLow:4, repHigh:8},
   // Legs (more)
-  {id:'sissy_squat', name:'Sissy Squat', group:'Legs', type:'isolation', repLow:8, repHigh:12},
-  {id:'step_up', name:'Step-Up', group:'Legs', type:'compound', repLow:8, repHigh:12},
-  {id:'box_squat', name:'Box Squat', group:'Legs', type:'compound', repLow:4, repHigh:8},
-  {id:'hip_abduction', name:'Hip Abduction Machine', group:'Legs', type:'isolation', repLow:12, repHigh:18},
-  {id:'hip_adduction', name:'Hip Adduction Machine', group:'Legs', type:'isolation', repLow:12, repHigh:18},
-  {id:'glute_kickback', name:'Glute Kickback', group:'Legs', type:'isolation', repLow:10, repHigh:15},
-  {id:'cable_pull_through', name:'Cable Pull-Through', group:'Legs', type:'compound', repLow:10, repHigh:15},
-  {id:'nordic_curl', name:'Nordic Hamstring Curl', group:'Legs', type:'isolation', repLow:6, repHigh:10},
-  {id:'single_leg_press', name:'Single-Leg Press', group:'Legs', type:'compound', repLow:8, repHigh:12},
+  {id:'sissy_squat', name:'Sissy Squat', group:'Quads', type:'isolation', repLow:8, repHigh:12},
+  {id:'step_up', name:'Step-Up', group:'Quads', type:'compound', repLow:8, repHigh:12},
+  {id:'box_squat', name:'Box Squat', group:'Quads', type:'compound', repLow:4, repHigh:8},
+  {id:'hip_abduction', name:'Hip Abduction Machine', group:'Glutes', type:'isolation', repLow:12, repHigh:18},
+  {id:'hip_adduction', name:'Hip Adduction Machine', group:'Quads', type:'isolation', repLow:12, repHigh:18},
+  {id:'glute_kickback', name:'Glute Kickback', group:'Glutes', type:'isolation', repLow:10, repHigh:15},
+  {id:'cable_pull_through', name:'Cable Pull-Through', group:'Glutes', type:'compound', repLow:10, repHigh:15},
+  {id:'nordic_curl', name:'Nordic Hamstring Curl', group:'Hamstrings', type:'isolation', repLow:6, repHigh:10},
+  {id:'single_leg_press', name:'Single-Leg Press', group:'Quads', type:'compound', repLow:8, repHigh:12},
   // Shoulders (more)
   {id:'landmine_press_shoulder', name:'Landmine Shoulder Press', group:'Shoulders', type:'compound', repLow:6, repHigh:10},
   {id:'cable_front_raise', name:'Cable Front Raise', group:'Shoulders', type:'isolation', repLow:10, repHigh:15},
@@ -472,7 +472,7 @@ const EXERCISES = [
   {id:'hiking', name:'Hiking', group:'Cardio', cardio:true},
   {id:'ski_erg', name:'Ski Erg', group:'Cardio', cardio:true},
 ];
-const GROUP_ORDER = ['Chest','Back','Legs','Shoulders','Biceps','Triceps','Core'];
+const GROUP_ORDER = ['Chest','Back','Quads','Hamstrings','Glutes','Calves','Shoulders','Biceps','Triceps','Core'];
 
 let customExercises = [];
 function allExercises(){ return EXERCISES.concat(customExercises); }
@@ -905,10 +905,13 @@ function groupsHit(w){
    MEV/MAV ballpark) — bigger groups like Back tolerate and need more
    volume than small groups like Biceps/Triceps or Core, so one blanket
    sets target across the whole body isn't accurate for any of them.
-   Biceps and Triceps are tracked separately rather than as one "Arms"
-   group — they're different muscles worked by different exercises, and
-   a curl-only day shouldn't read as balanced arm training. */
-const GROUP_WEEKLY_SET_TARGET = { Chest:12, Back:14, Legs:12, Shoulders:12, Biceps:8, Triceps:8, Core:8 };
+   Biceps/Triceps and Quads/Hamstrings/Glutes/Calves are tracked
+   separately rather than lumped into "Arms"/"Legs" — they're different
+   muscles worked by different exercises, and a squat-only day
+   shouldn't read as having also trained hamstrings. Calves sit higher
+   than other small groups since they're notoriously slow-responding
+   and conventionally programmed with more volume. */
+const GROUP_WEEKLY_SET_TARGET = { Chest:12, Back:14, Quads:12, Hamstrings:10, Glutes:10, Calves:12, Shoulders:12, Biceps:8, Triceps:8, Core:8 };
 function groupSetsInWorkout(w, group){
   let sets=0;
   (w.entries||[]).forEach(function(en){
@@ -1631,8 +1634,10 @@ function bodyDiagramSvg(){
     + '<rect x="30" y="82" width="16" height="70" rx="8" fill="'+c('Biceps')+'"><title>'+t('Biceps')+'</title></rect>'
     + '<rect x="114" y="82" width="16" height="70" rx="8" fill="'+c('Biceps')+'"><title>'+t('Biceps')+'</title></rect>'
     + '<rect x="58" y="112" width="44" height="44" rx="8" fill="'+c('Core')+'"><title>'+t('Core')+'</title></rect>'
-    + '<rect x="56" y="160" width="20" height="80" rx="9" fill="'+c('Legs')+'"><title>'+t('Legs')+'</title></rect>'
-    + '<rect x="84" y="160" width="20" height="80" rx="9" fill="'+c('Legs')+'"><title>'+t('Legs')+'</title></rect>'
+    + '<rect x="56" y="160" width="20" height="55" rx="9" fill="'+c('Quads')+'"><title>'+t('Quads')+'</title></rect>'
+    + '<rect x="84" y="160" width="20" height="55" rx="9" fill="'+c('Quads')+'"><title>'+t('Quads')+'</title></rect>'
+    + '<rect x="56" y="218" width="20" height="22" rx="6" fill="'+c('Calves')+'"><title>'+t('Calves')+'</title></rect>'
+    + '<rect x="84" y="218" width="20" height="22" rx="6" fill="'+c('Calves')+'"><title>'+t('Calves')+'</title></rect>'
   );
   const back = fig(
       '<rect x="40" y="46" width="18" height="34" rx="9" fill="'+c('Shoulders')+'"><title>'+t('Shoulders')+'</title></rect>'
@@ -1640,8 +1645,11 @@ function bodyDiagramSvg(){
     + '<rect x="52" y="50" width="56" height="66" rx="10" fill="'+c('Back')+'"><title>'+t('Back')+'</title></rect>'
     + '<rect x="30" y="82" width="16" height="70" rx="8" fill="'+c('Triceps')+'"><title>'+t('Triceps')+'</title></rect>'
     + '<rect x="114" y="82" width="16" height="70" rx="8" fill="'+c('Triceps')+'"><title>'+t('Triceps')+'</title></rect>'
-    + '<rect x="56" y="160" width="20" height="80" rx="9" fill="'+c('Legs')+'"><title>'+t('Legs')+'</title></rect>'
-    + '<rect x="84" y="160" width="20" height="80" rx="9" fill="'+c('Legs')+'"><title>'+t('Legs')+'</title></rect>'
+    + '<rect x="58" y="118" width="44" height="38" rx="8" fill="'+c('Glutes')+'"><title>'+t('Glutes')+'</title></rect>'
+    + '<rect x="56" y="160" width="20" height="55" rx="9" fill="'+c('Hamstrings')+'"><title>'+t('Hamstrings')+'</title></rect>'
+    + '<rect x="84" y="160" width="20" height="55" rx="9" fill="'+c('Hamstrings')+'"><title>'+t('Hamstrings')+'</title></rect>'
+    + '<rect x="56" y="218" width="20" height="22" rx="6" fill="'+c('Calves')+'"><title>'+t('Calves')+'</title></rect>'
+    + '<rect x="84" y="218" width="20" height="22" rx="6" fill="'+c('Calves')+'"><title>'+t('Calves')+'</title></rect>'
   );
   return '<div class="body-diagram">'
     + '<div class="body-col"><div class="body-caption">Front</div>'+front+'</div>'
