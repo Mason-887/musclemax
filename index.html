@@ -1911,9 +1911,15 @@ function renderHistory(){
       html += '<div class="wk-detail">';
       (w.entries||[]).forEach(function(en){
         const ex = exById(en.exerciseId);
-        const setsLabel = (en.sets||[]).map(function(s){
-          return (ex && ex.cardio) ? (s.minutes+' min'+(s.distance?' &middot; '+s.distance+' mi':'')) : (s.weight+'×'+s.reps);
-        }).join(', ');
+        const sets = en.sets||[];
+        let setsLabel;
+        if(ex && ex.cardio){
+          setsLabel = sets.map(function(s){ return s.minutes+' min'+(s.distance?' &middot; '+s.distance+' mi':''); }).join(', ');
+        } else {
+          const reps = sets.map(function(s){ return s.reps; });
+          const uniform = reps.length && reps.every(function(r){ return r===reps[0]; });
+          setsLabel = uniform ? (sets.length+'×'+reps[0]) : (sets.length+' sets ('+reps.join(', ')+')');
+        }
         html += '<div class="wk-ex-row"><span>'+(ex?ex.name:en.exerciseId)+'</span><span class="sets">'+setsLabel+'</span></div>';
       });
       const rec = workoutRecommendation(w.date);
