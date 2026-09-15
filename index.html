@@ -1621,36 +1621,19 @@ function renderPRs(){
 }
 
 /* ---------------- render: tracking ---------------- */
-/* Smooth closed spline through a handful of rough anchor points
-   (Catmull-Rom -> cubic Bezier) — used to build exactly THREE clean
-   silhouette outlines (torso, one leg, one arm). Muscle zones are then
-   painted as plain rects clipped to those outlines, so every zone's
-   outer edge is always the same smooth body line — no seams, no
-   separately-drawn blobs that can drift out of alignment with each
-   other the way the old per-muscle shapes did. */
-function bodySmooth(pts){
-  const n = pts.length;
-  function get(i){ return pts[(i+n)%n]; }
-  let d = 'M'+pts[0][0].toFixed(1)+','+pts[0][1].toFixed(1);
-  for(let i=0;i<n;i++){
-    const p0=get(i-1), p1=get(i), p2=get(i+1), p3=get(i+2);
-    const c1x = p1[0]+(p2[0]-p0[0])/6, c1y = p1[1]+(p2[1]-p0[1])/6;
-    const c2x = p2[0]-(p3[0]-p1[0])/6, c2y = p2[1]-(p3[1]-p1[1])/6;
-    d += ' C'+c1x.toFixed(1)+','+c1y.toFixed(1)+' '+c2x.toFixed(1)+','+c2y.toFixed(1)+' '+p2[0].toFixed(1)+','+p2[1].toFixed(1);
-  }
-  return d+' Z';
+/* The figure is deliberately built from the simplest possible shapes —
+   plain rounded trapezoids plus a few ellipses — laid out on real
+   human proportions (~8 head-heights tall, shoulders ~2 heads wide).
+   Earlier versions used organic splines that read as lumpy, and were
+   stretched to ~11 head-heights, which is why they looked off. */
+function bodyTrap(cx1,y1,w1,cx2,y2,w2,r){
+  r = r||6;
+  const topL=cx1-w1/2, topR=cx1+w1/2, botL=cx2-w2/2, botR=cx2+w2/2;
+  return 'M'+(topL+r)+','+y1+' L'+(topR-r)+','+y1+' Q'+topR+','+y1+' '+topR+','+(y1+r)
+    +' L'+botR+','+(y2-r)+' Q'+botR+','+y2+' '+(botR-r)+','+y2
+    +' L'+(botL+r)+','+y2+' Q'+botL+','+y2+' '+botL+','+(y2-r)
+    +' L'+topL+','+(y1+r)+' Q'+topL+','+y1+' '+(topL+r)+','+y1+' Z';
 }
-// Three silhouette outlines, each as rough anchor points smoothed by
-// bodySmooth: TORSO (right-side profile, neck to hip — mirrored to
-// close the loop), LEG (one thigh-to-ankle taper), ARM (one
-// shoulder-to-wrist taper). Every muscle is just a plain rect painted
-// through a clip-path built from one of these three, so nothing can
-// visually drift apart from the body outline the way separately-drawn
-// blobs could.
-const TORSO_RIGHT = [[10,42],[46,58],[44,90],[36,130],[26,152],[34,172],[32,186]];
-const TORSO_PTS = TORSO_RIGHT.concat(TORSO_RIGHT.slice().reverse().map(function(p){ return [-p[0],p[1]]; }));
-const LEG_PTS = [[15,184],[17,220],[15,260],[11,295],[9,320],[10,345],[7,368],[2,384],[-3,384],[-7,368],[-9,345],[-8,320],[-9,295],[-13,260],[-15,220],[-14,184]];
-const ARM_PTS = [[14,60],[15,90],[13,120],[10,150],[8,175],[9,200],[6,222],[2,235],[-2,235],[-6,222],[-8,200],[-9,175],[-11,150],[-14,120],[-16,90],[-15,60]];
 /* Continuous green -> yellow -> orange -> red heat gradient (like a
    real muscle-recovery heatmap) instead of a 3-bucket palette — every
    point score gets its own shade rather than snapping between a
@@ -1665,67 +1648,40 @@ function diagramHeatColor(score){
 function bodyDiagramSvg(){
   const g = {};
   GROUP_ORDER.forEach(function(grp){ g[grp] = groupStrain(grp,7); });
-  function c(grp){ return diagramHeatColor(g[grp]); }
-  function glow(grp){ return (g[grp]!==null && g[grp]>=67) ? ' filter="url(#bodyGlow)"' : ''; }
   function t(grp){ const s=g[grp]; return grp+': '+(s===null?'not trained this week':s+'/100 strain'); }
-  function offset(cx, pts){ return pts.map(function(p){ return [cx+p[0], p[1]]; }); }
-  const neutral = '#2f3444', edgeLight = '#3d4457';
-  const torsoPts = offset(100, TORSO_PTS);
-  const legPts = { L: offset(74, LEG_PTS), R: offset(126, LEG_PTS) };
-  const armPts = { L: offset(50, ARM_PTS), R: offset(150, ARM_PTS) };
-  const defs = '<defs>'
-    + '<clipPath id="clipTorso"><path d="'+bodySmooth(torsoPts)+'"/></clipPath>'
-    + '<clipPath id="clipLegL"><path d="'+bodySmooth(legPts.L)+'"/></clipPath>'
-    + '<clipPath id="clipLegR"><path d="'+bodySmooth(legPts.R)+'"/></clipPath>'
-    + '<clipPath id="clipArmL"><path d="'+bodySmooth(armPts.L)+'"/></clipPath>'
-    + '<clipPath id="clipArmR"><path d="'+bodySmooth(armPts.R)+'"/></clipPath>'
-    + '<filter id="bodyGlow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="3.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
-    + '<linearGradient id="bodySheen" x1="0" y1="0" x2="0.7" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.22"/><stop offset="0.6" stop-color="#fff" stop-opacity="0"/></linearGradient>'
-    + '</defs>';
-  function zone(x,y,w,h,clipId,grp){
-    return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" clip-path="url(#'+clipId+')" fill="'+c(grp)+'"'+glow(grp)+'><title>'+t(grp)+'</title></rect>'
-      + '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" clip-path="url(#'+clipId+')" fill="url(#bodySheen)" pointer-events="none"/>';
+  function glow(grp){ return (g[grp]!==null && g[grp]>=67) ? ' filter="url(#bodyGlow)"' : ''; }
+  const neutral = '#2f3444', edge = '#3d4457';
+  function part(d, grp){
+    return '<path d="'+d+'" fill="'+diagramHeatColor(g[grp])+'" stroke="'+edge+'" stroke-width="1"'+glow(grp)+'><title>'+t(grp)+'</title></path>';
   }
-  function outline(pts, clipId){
-    return '<path d="'+bodySmooth(pts)+'" fill="none" stroke="'+edgeLight+'" stroke-width="1.3" clip-path="url(#'+clipId+')"/>'
-      + '<path d="'+bodySmooth(pts)+'" fill="none" stroke="rgba(0,0,0,.35)" stroke-width="1.3"/>';
+  function plain(d){ return '<path d="'+d+'" fill="'+neutral+'" stroke="'+edge+'" stroke-width="1"/>'; }
+  const defs = '<defs><filter id="bodyGlow" x="-60%" y="-60%" width="220%" height="220%">'
+    + '<feGaussianBlur stdDeviation="2.6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>'
+    + '</filter></defs>';
+  function figure(isBack){
+    let s = defs;
+    s += '<ellipse cx="100" cy="17" rx="15" ry="15" fill="'+neutral+'" stroke="'+edge+'"/>';
+    s += plain(bodyTrap(100,30,14,100,40,18,3));
+    // Full-width shoulder band first; chest/back paints over its middle,
+    // leaving the deltoids showing at the outer corners.
+    s += part(bodyTrap(100,40,72,100,74,62,8),'Shoulders');
+    s += part(bodyTrap(100,42,62,100, isBack?112:96, isBack?42:38, 8), isBack?'Back':'Chest');
+    s += isBack ? part(bodyTrap(100,104,42,100,124,46,8),'Glutes')
+                : part(bodyTrap(100,94,40,100,122,44,8),'Core');
+    [50,150].forEach(function(cx){
+      s += part(bodyTrap(cx,40,20,cx,130,13,7), isBack?'Triceps':'Biceps');
+      s += '<ellipse cx="'+cx+'" cy="138" rx="7" ry="9" fill="'+neutral+'" stroke="'+edge+'"/>';
+    });
+    [74,126].forEach(function(cx){
+      s += part(bodyTrap(cx,120,32,cx,182,22,8), isBack?'Hamstrings':'Quads');
+      s += part(bodyTrap(cx,180,22,cx,236,14,6),'Calves');
+      s += '<ellipse cx="'+cx+'" cy="242" rx="11" ry="6" fill="'+neutral+'" stroke="'+edge+'"/>';
+    });
+    return '<svg class="body-svg" viewBox="0 0 200 252" xmlns="http://www.w3.org/2000/svg">'+s+'</svg>';
   }
-  function fig(regions){
-    return '<svg class="body-svg" viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">' + defs
-      + '<ellipse cx="100" cy="20" rx="15" ry="17" fill="'+neutral+'" stroke="'+edgeLight+'"/>'
-      + '<path d="M90,40 L110,40 L107,56 L93,56 Z" fill="'+neutral+'"/>'
-      + regions
-      + '<circle cx="50" cy="234" r="9" fill="'+neutral+'" stroke="'+edgeLight+'"/>'
-      + '<circle cx="150" cy="234" r="9" fill="'+neutral+'" stroke="'+edgeLight+'"/>'
-      + '<ellipse cx="74" cy="388" rx="12" ry="7" fill="'+neutral+'" stroke="'+edgeLight+'"/>'
-      + '<ellipse cx="126" cy="388" rx="12" ry="7" fill="'+neutral+'" stroke="'+edgeLight+'"/>'
-      + '</svg>';
-  }
-  function legZones(topGrp, botGrp){
-    return zone(58,184,32,126,'clipLegL',topGrp) + zone(58,310,32,80,'clipLegL',botGrp) + outline(legPts.L,'clipLegL')
-      + zone(110,184,32,126,'clipLegR',topGrp) + zone(110,310,32,80,'clipLegR',botGrp) + outline(legPts.R,'clipLegR');
-  }
-  function armZones(grp){
-    return zone(30,58,44,180,'clipArmL',grp) + outline(armPts.L,'clipArmL')
-      + zone(126,58,44,180,'clipArmR',grp) + outline(armPts.R,'clipArmR');
-  }
-  const frontRegions =
-      zone(24,40,152,90,'clipTorso','Shoulders')
-    + zone(30,112,140,74,'clipTorso','Core')
-    + zone(60,58,80,54,'clipTorso','Chest')
-    + outline(torsoPts,'clipTorso')
-    + legZones('Quads','Calves')
-    + armZones('Biceps');
-  const backRegions =
-      zone(24,40,152,90,'clipTorso','Shoulders')
-    + zone(55,58,90,132,'clipTorso','Back')
-    + zone(60,150,80,40,'clipTorso','Glutes')
-    + outline(torsoPts,'clipTorso')
-    + legZones('Hamstrings','Calves')
-    + armZones('Triceps');
   return '<div class="body-diagram">'
-    + '<div class="body-col"><div class="body-caption">Front</div>'+fig(frontRegions)+'</div>'
-    + '<div class="body-col"><div class="body-caption">Back</div>'+fig(backRegions)+'</div>'
+    + '<div class="body-col"><div class="body-caption">Front</div>'+figure(false)+'</div>'
+    + '<div class="body-col"><div class="body-caption">Back</div>'+figure(true)+'</div>'
     + '</div>';
 }
 function renderVolumeBars(){
