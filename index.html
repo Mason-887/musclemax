@@ -1027,20 +1027,26 @@ function groupsHit(w){
   (w.entries||[]).forEach(function(en){ const ex=exById(en.exerciseId); if(ex) gs.add(ex.group); });
   return gs;
 }
-/* Weekly working-set landmarks by muscle group, anchored to the MEV
-   (minimum effective volume) end of the hypertrophy literature rather
-   than MAV (maximum adaptive volume) — the earlier MAV-leaning numbers
-   produced targets that felt like a lot (e.g. 6 sets of calves in one
-   sitting from a 12-set weekly figure). MEV is the volume floor where
-   growth reliably starts, a more conservative and encouraging target
-   than the upper end of what's adaptable. Bigger groups like Back
-   still tolerate more than small groups like Biceps/Triceps or Core,
-   so one blanket target across the whole body still isn't accurate
-   for any of them. Biceps/Triceps and Quads/Hamstrings/Glutes/Calves
-   are tracked separately rather than lumped into "Arms"/"Legs" —
-   they're different muscles worked by different exercises, and a
-   squat-only day shouldn't read as having also trained hamstrings. */
-const GROUP_WEEKLY_SET_TARGET = { Chest:8, Back:10, Quads:8, Hamstrings:6, Glutes:6, Calves:6, Shoulders:8, Biceps:6, Triceps:6, Core:6 };
+/* Weekly working-set landmarks by muscle group — the early-trainee
+   MEV (minimum effective volume) column from a training-age-tiered
+   table built on the Schoenfeld, Ogborn & Krieger (2017) dose-response
+   meta-analysis and Krieger's (2010) earlier multi-set meta-analysis,
+   with Israetel/Renaissance Periodization's MEV/MAV/MRV framework
+   layered on top: Chest/Back/Shoulders/Quads 6-8, Hamstrings/Biceps/
+   Triceps/Calves 4-6, Abs 0-4 (upper bound of each range used here).
+   Glutes aren't broken out in that source; kept in line with
+   Hamstrings since they're trained by much the same compound lifts.
+   MEV is deliberately the volume FLOOR where growth reliably starts,
+   not the MAV ceiling of what's adaptable — a conservative,
+   achievable target rather than the most volume someone could
+   productively handle. Bigger groups like Back still tolerate more
+   than small groups like Biceps/Triceps or Core, so one blanket
+   target across the whole body still isn't accurate for any of them.
+   Biceps/Triceps and Quads/Hamstrings/Glutes/Calves are tracked
+   separately rather than lumped into "Arms"/"Legs" — they're
+   different muscles worked by different exercises, and a squat-only
+   day shouldn't read as having also trained hamstrings. */
+const GROUP_WEEKLY_SET_TARGET = { Chest:8, Back:8, Quads:8, Hamstrings:6, Glutes:6, Calves:6, Shoulders:8, Biceps:6, Triceps:6, Core:4 };
 /* Assumed weekly training frequency per group, used only for the
    per-session fallback baseline below when there's no personal
    history for that group yet. Small, fast-recovering groups (Calves,
