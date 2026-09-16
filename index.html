@@ -195,8 +195,6 @@ a{ color:var(--accent); }
 .streak-dashboard-card .streak-text-sub{ font-size:12px; color:var(--text-dim); margin-top:2px; }
 .feed-streak-badge{ margin-left:auto; }
 .wk-detail{ margin-top:12px; padding-top:12px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:10px; }
-.suggested-workout-card{ cursor:default; border-color:var(--accent); }
-.suggested-workout-card:hover{ box-shadow:var(--shadow-1); }
 .wk-ex-row{ display:flex; justify-content:space-between; font-size:13.5px; gap:10px; }
 .wk-ex-row .sets{ color:var(--text-dim); font-family:var(--font-mono); font-size:12.5px; text-align:right; }
 .empty-state{ text-align:center; padding:40px 20px; color:var(--text-dim); font-size:14px; }
@@ -1552,150 +1550,6 @@ const GOAL_PRESCRIPTION = {
   maintain:  { compound:{sets:3, repLo:8,  repHi:10, rpe:7},   isolation:{sets:3, repLo:10, repHi:12, rpe:7}   }
 };
 function myGoalKey(){ return (myStats && myStats.goal && GOAL_PROFILES[myStats.goal]) ? myStats.goal : 'maintain'; }
-/* Named split templates the engine tries to recognize in a person's
-   own training history — the standard structured splits used in
-   practice (Push/Pull/Legs, Upper/Lower, and a classic 5-day body-part
-   "bro split"). Core is deliberately left out of every template since
-   it's conventionally trained flexibly across whichever days rather
-   than defining a split day on its own. */
-const SPLIT_TEMPLATES = {
-  ppl: { label:'Push/Pull/Legs', days:[
-    { label:'Push Day', groups:['Chest','Shoulders','Triceps'] },
-    { label:'Pull Day', groups:['Back','Biceps'] },
-    { label:'Leg Day',  groups:['Quads','Hamstrings','Glutes','Calves'] }
-  ]},
-  upperLower: { label:'Upper/Lower', days:[
-    { label:'Upper Body', groups:['Chest','Back','Shoulders','Biceps','Triceps'] },
-    { label:'Lower Body', groups:['Quads','Hamstrings','Glutes','Calves'] }
-  ]},
-  broSplit: { label:'Body-Part Split', days:[
-    { label:'Chest Day',    groups:['Chest'] },
-    { label:'Back Day',     groups:['Back'] },
-    { label:'Shoulder Day', groups:['Shoulders'] },
-    { label:'Arm Day',      groups:['Biceps','Triceps'] },
-    { label:'Leg Day',      groups:['Quads','Hamstrings','Glutes','Calves'] }
-  ]}
-};
-function jaccard(groupSet, groupArr){
-  const b = {}; groupArr.forEach(function(g){ b[g]=true; });
-  const union = {}; let inter=0;
-  groupSet.forEach(function(g){ union[g]=true; if(b[g]) inter++; });
-  groupArr.forEach(function(g){ union[g]=true; });
-  const unionSize = Object.keys(union).length;
-  return unionSize ? inter/unionSize : 0;
-}
-function bestDayMatch(groupSet, days){
-  let best=null, bestScore=-1;
-  days.forEach(function(day){
-    const score = jaccard(groupSet, day.groups);
-    if(score>bestScore){ bestScore=score; best=day; }
-  });
-  return { day:best, score:bestScore };
-}
-/* One entry per distinct date actually trained (merging same-date
-   workouts, as the scoring functions do), newest first, as a
-   Core-excluded set of groups hit — the "signature" the split
-   detector pattern-matches against. */
-function recentSessionSignatures(limit){
-  const byDate = {};
-  workouts.forEach(function(w){ (byDate[w.date] = byDate[w.date]||[]).push(w); });
-  return Object.keys(byDate).sort(function(a,b){ return a<b?1:-1; }).slice(0, limit||20).map(function(date){
-    const merged = { entries:[].concat.apply([], byDate[date].map(function(w){ return w.entries||[]; })) };
-    const gs = groupsHit(merged);
-    gs.delete('Core');
-    return { date:date, groups:gs };
-  }).filter(function(s){ return s.groups.size>0; });
-}
-/* Recognize which named split (if any) a person's actual sessions
-   look like they're following, by matching each recent session
-   against every template's days and averaging the best-match score
-   per template. Requires a reasonable amount of history and a decent
-   average match (>=0.55 Jaccard) before committing to a split — a
-   handful of inconsistent sessions shouldn't get force-fit into one. */
-function detectSplit(){
-  const sessions = recentSessionSignatures(20);
-  if(sessions.length < 3) return null;
-  let bestType=null, bestAvg=-1;
-  Object.keys(SPLIT_TEMPLATES).forEach(function(key){
-    const scores = sessions.map(function(s){ return bestDayMatch(s.groups, SPLIT_TEMPLATES[key].days).score; });
-    const avg = scores.reduce(function(a,b){ return a+b; },0)/scores.length;
-    if(avg>bestAvg){ bestAvg=avg; bestType=key; }
-  });
-  return bestAvg>=0.55 ? bestType : null;
-}
-/* Which day within a split is due next: whichever day's groups
-   haven't been trained in the longest, preferring one that's cleared
-   the 48h same-muscle recovery minimum (ACSM/NSCA) if any has. */
-function nextSplitDay(splitKey){
-  const days = SPLIT_TEMPLATES[splitKey].days;
-  const sessions = recentSessionSignatures(20);
-  const lastTrained = {};
-  sessions.forEach(function(s){
-    const m = bestDayMatch(s.groups, days);
-    if(m.score>=0.4 && (!lastTrained[m.day.label] || s.date>lastTrained[m.day.label])){
-      lastTrained[m.day.label] = s.date;
-    }
-  });
-  const ranked = days.map(function(day){
-    const d = lastTrained[day.label];
-    return { day:day, daysSince: d ? daysAgo(d) : Infinity };
-  }).sort(function(a,b){ return b.daysSince-a.daysSince; });
-  const recovered = ranked.filter(function(r){ return r.daysSince>=2; });
-  return (recovered[0] || ranked[0]).day;
-}
-/* Up to `count` exercises for a group: a compound first (bigger
-   lifts are conventionally programmed before accessories, since they
-   demand the most out of fresh muscle), then isolations to round it
-   out. Exercises already in the person's history are preferred, since
-   that's what gives recommendation() a real weight to suggest. */
-function pickExercisesForGroup(group, count){
-  const pool = allExercises().filter(function(e){ return e.group===group && !e.cardio; });
-  const compounds = pool.filter(function(e){ return e.type==='compound'; });
-  const isolations = pool.filter(function(e){ return e.type==='isolation'; });
-  function byFamiliarity(list){
-    return list.slice().sort(function(a,b){ return exerciseHistory(b.id).length - exerciseHistory(a.id).length; });
-  }
-  return byFamiliarity(compounds).concat(byFamiliarity(isolations)).slice(0, count||2);
-}
-/* The full suggested session: which day of the person's own detected
-   split is due, which exercises for its muscle groups, and a
-   goal-calibrated sets x reps x RPE prescription for each, plus a
-   cardio nudge when the goal calls for it and this week is short on
-   cardio minutes. With too little history to recognize a personal
-   split yet, defaults to a Push/Pull/Legs rotation — the most common
-   general-purpose structured split — rather than guessing blind. */
-function suggestedWorkoutPlan(){
-  const goalKey = myGoalKey();
-  const presc = GOAL_PRESCRIPTION[goalKey];
-  const splitKey = detectSplit();
-  const effectiveSplit = splitKey || 'ppl';
-  const day = nextSplitDay(effectiveSplit);
-  const dayLabel = SPLIT_TEMPLATES[effectiveSplit].label+' &middot; '+day.label;
-  const groups = day.groups;
-  const perGroupCount = groups.length<=2 ? 2 : (groups.length===3 ? 2 : 1);
-  const exercises = [];
-  groups.forEach(function(group){
-    pickExercisesForGroup(group, perGroupCount).forEach(function(ex){
-      const p = presc[ex.type] || presc.compound;
-      const rec = recommendation(ex.id);
-      exercises.push({
-        exerciseId: ex.id, name: ex.name, group: group, type: ex.type,
-        sets: p.sets, repLo: p.repLo, repHi: p.repHi, rpe: p.rpe,
-        weight: rec ? rec.weight : null
-      });
-    });
-  });
-  let cardioTip = null;
-  if(goalKey==='fatloss' || goalKey==='endurance'){
-    const weeklyCardio = entriesInWindow(7).reduce(function(s,w){ return s+cardioMinutes(w); },0);
-    const cardioTarget = 150; // ACSM: >=150 min/week moderate-intensity aerobic activity
-    if(weeklyCardio < cardioTarget*0.6){
-      cardioTip = Math.round(cardioTarget/7*1.5)+'-'+Math.round(cardioTarget/7*2.2)+' min of moderate cardio — '+Math.round(weeklyCardio)+' of the ~'+cardioTarget+' min/week ACSM guideline logged so far this week.';
-    }
-  }
-  return { goalKey:goalKey, dayLabel:dayLabel, groups:groups, exercises:exercises, cardioTip:cardioTip, splitDetected: !!splitKey };
-}
-
 /* ---------------- gauge svg ---------------- */
 function gaugeSvg(score){
   const R=120, CX=150, CY=150;
@@ -1773,35 +1627,6 @@ function renderLastWorkoutWidget(){
     + '</div></div>';
 }
 
-/* One-line rep-range label, e.g. "4x8-10 @ RPE 7.5" — RPE trimmed to
-   a whole number when it lands on one, otherwise shown to one decimal
-   so 8.5 doesn't render as 8.5000000001-style noise from float math. */
-function planSetLabel(item){
-  const rpe = Math.round(item.rpe*2)/2;
-  const rpeStr = rpe===Math.round(rpe) ? rpe.toFixed(0) : rpe.toFixed(1);
-  return item.sets+'&times;'+item.repLo+'-'+item.repHi+' @ RPE '+rpeStr;
-}
-function renderSuggestedWorkout(){
-  const plan = suggestedWorkoutPlan();
-  if(!plan.exercises.length) return '';
-  const goalLabel = GOAL_PROFILES[plan.goalKey].label;
-  const groupChips = plan.groups.map(function(g){ return '<span class="group-chip">'+g+'</span>'; }).join('');
-  const rows = plan.exercises.map(function(item){
-    return '<div class="wk-ex-row"><span>'+item.name+'</span><span class="sets">'+planSetLabel(item)+(item.weight?' &middot; ~'+item.weight+' lb':'')+'</span></div>';
-  }).join('');
-  const cardioRow = plan.cardioTip ? '<div class="rec-hint" style="margin-top:10px;">Also: '+plan.cardioTip+'</div>' : '';
-  const splitNote = plan.splitDetected
-    ? 'Matches your usual training split.'
-    : 'Not enough history yet to detect your split — defaulting to a Push/Pull/Legs rotation.';
-  return '<div class="wk-card suggested-workout-card">'
-    + '<div class="wk-top"><div><div class="wk-date">'+plan.dayLabel+'</div><div class="wk-sub">For '+goalLabel+' &middot; '+splitNote+'</div></div></div>'
-    + '<div class="wk-meta" style="margin-top:8px;">'+groupChips+'</div>'
-    + '<div class="wk-detail" style="margin-top:12px; padding-top:0; border-top:none;">' + rows + '</div>'
-    + cardioRow
-    + '<button class="btn btn-primary" style="width:100%; margin-top:12px;" data-action="start-suggested-workout">Start This Workout</button>'
-    + '<p class="my-code-hint" style="margin:10px 0 0;">Recognizes your recent Push/Pull/Legs, Upper/Lower or body-part split from your own workout history and picks whichever day in that rotation is due (recovered 48h+, least recently trained), prioritizing exercises you already have a weight history for. Sets/reps follow the standard NSCA strength-vs-hypertrophy-vs-endurance loading ranges for your goal.</p>'
-    + '</div>';
-}
 function renderHome(){
   if(!state.me) return renderOnboarding();
   const s = sevenDayScore();
@@ -1842,7 +1667,6 @@ function renderHome(){
   +     '<div class="chip"><div class="chip-val">'+s.recovery+'</div><div class="chip-key">Recovery</div></div>'
   +   '</div>'
   + '</div>'
-  + (viewing ? '' : renderSuggestedWorkout())
   + renderLastWorkoutWidget()
   + (viewing ? '' : '<div class="action-grid">'
   +   '<button class="action-card primary" data-action="new-workout"><div class="glyph"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg></div><h3>Start Workout</h3><p>Log sets, reps &amp; weight as you lift.</p></button>'
@@ -2610,18 +2434,6 @@ document.getElementById('app').addEventListener('click', async function(e){
   }
   else if(action==='new-workout'){ state.draft={date:todayISO(), entries:[], cardioOnly:false, startedAt:Date.now()}; state.pickerOpen=true; state.pickerQuery=''; state.view='workout'; render(); }
   else if(action==='new-cardio'){ state.draft={date:todayISO(), entries:[], cardioOnly:true, startedAt:Date.now()}; state.pickerOpen=true; state.pickerQuery=''; state.view='workout'; render(); }
-  else if(action==='start-suggested-workout'){
-    const plan = suggestedWorkoutPlan();
-    const entries = plan.exercises.map(function(item){
-      const sets = [];
-      for(let i=0;i<item.sets;i++){ sets.push({ weight:item.weight, reps:item.repLo, rpe:null, loggedAt:Date.now() }); }
-      return { exerciseId:item.exerciseId, sets:sets };
-    });
-    state.draft = { date:todayISO(), entries:entries, cardioOnly:false, startedAt:Date.now() };
-    state.pickerOpen = false; state.pickerQuery='';
-    state.view = 'workout';
-    render();
-  }
   else if(action==='view-history'){ state.historyOpenId=null; state.view='history'; render(); }
   else if(action==='go-tab'){
     if(state.viewingFriend){ state.viewingFriend=null; refreshScope(); }
