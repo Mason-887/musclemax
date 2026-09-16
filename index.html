@@ -203,6 +203,10 @@ a{ color:var(--accent); }
 
 /* ---- Workout logging ---- */
 .wdate{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-dim); }
+.live-timer-bar{ display:flex; gap:10px; }
+.live-timer-card{ flex:1; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:10px 14px; text-align:center; }
+.live-timer-card .live-timer-key{ font-size:10px; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-dim); font-weight:600; }
+.live-timer-card .live-timer-val{ font-family:var(--font-mono); font-weight:700; font-size:19px; margin-top:2px; font-variant-numeric:tabular-nums; }
 .wdate input{ background:none; border:none; color:var(--text); font-family:var(--font-mono); font-size:13px; }
 .search-box{ display:flex; align-items:center; gap:8px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:10px 14px; }
 .search-box input{ flex:1; background:none; border:none; outline:none; font-size:16px; }
@@ -2272,6 +2276,12 @@ function renderWorkout(){
   let html = '<div class="topbar"><button class="back-btn" data-action="cancel-workout">&larr; Cancel</button><div class="wdate">'+(editing?'Editing &middot; ':'')+(state.draft.cardioOnly?'Cardio &middot; ':'')+fmtDate(state.draft.date)+'</div>'
     + (editing ? '<span style="width:70px"></span>' : '<button class="icon-btn" data-action="pause-workout">Pause</button>')
     + '</div>';
+  if(!editing){
+    html += '<div class="live-timer-bar">'
+      + '<div class="live-timer-card"><div class="live-timer-val" id="live-total-timer">0:00</div><div class="live-timer-key">Workout Time</div></div>'
+      + '<div class="live-timer-card"><div class="live-timer-val" id="live-rest-timer">&mdash;</div><div class="live-timer-key">Rest Since Last Set</div></div>'
+      + '</div>';
+  }
   if(state.pickerOpen || state.draft.entries.length===0){
     html += renderPicker();
   } else {
@@ -2365,6 +2375,30 @@ function renderDetail(){
 /* ---------------- master render ---------------- */
 const TAB_VIEWS = ['home','tracking','prs','feed','friends','history'];
 let _lastRenderedView = null;
+let _liveTimerInterval = null;
+/* mm:ss (or h:mm:ss past an hour) — used by the live total-workout
+   and rest timers. Updates the DOM directly rather than going through
+   render(), since a full re-render every second would wipe out
+   whatever the person is mid-typing in a weight/reps field. */
+function fmtTimer(ms){
+  const totalSec = Math.max(0, Math.floor(ms/1000));
+  const h = Math.floor(totalSec/3600), m = Math.floor((totalSec%3600)/60), s = totalSec%60;
+  const mm = h>0 ? String(m).padStart(2,'0') : String(m);
+  return (h>0 ? h+':' : '')+mm+':'+String(s).padStart(2,'0');
+}
+function updateLiveTimers(){
+  if(!state.draft) return;
+  const totalEl = document.getElementById('live-total-timer');
+  if(totalEl && state.draft.startedAt){ totalEl.textContent = fmtTimer(Date.now()-state.draft.startedAt); }
+  const restEl = document.getElementById('live-rest-timer');
+  if(restEl){
+    let lastLogged = 0;
+    (state.draft.entries||[]).forEach(function(en){
+      (en.sets||[]).forEach(function(s){ if(s.loggedAt && s.loggedAt>lastLogged) lastLogged=s.loggedAt; });
+    });
+    restEl.textContent = lastLogged ? fmtTimer(Date.now()-lastLogged) : '—';
+  }
+}
 function render(){
   const app = document.getElementById('app');
   const prevShell = document.querySelector('.shell');
@@ -2386,6 +2420,14 @@ function render(){
   if(newShell) newShell.scrollTop = scrollTop;
   _lastRenderedView = state.view;
   bindInputs();
+  const isLiveWorkout = state.view==='workout' && state.draft && !state.editingWorkoutId;
+  if(isLiveWorkout){
+    if(!_liveTimerInterval) _liveTimerInterval = setInterval(updateLiveTimers, 1000);
+    updateLiveTimers();
+  } else if(_liveTimerInterval){
+    clearInterval(_liveTimerInterval);
+    _liveTimerInterval = null;
+  }
 }
 
 function bindInputs(){
