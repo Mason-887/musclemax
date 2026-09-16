@@ -130,7 +130,9 @@ a{ color:var(--accent); }
 .chip-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:14px; }
 .chip{ background:var(--surface-2); border-radius:10px; padding:9px 6px; text-align:center; }
 .chip .chip-val{ font-family:var(--font-mono); font-weight:600; font-size:15px; }
-.chip .chip-key{ font-size:10px; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-dim); margin-top:2px; }
+.chip .chip-key{ font-size:10px; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-dim); margin-top:2px; display:flex; align-items:center; justify-content:center; gap:4px; }
+.chip-info-btn{ width:13px; height:13px; border-radius:50%; border:1px solid var(--text-dim); background:none; color:var(--text-dim); font-size:9px; font-family:var(--font-body); font-style:italic; font-weight:700; line-height:1; padding:0; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; }
+.chip-info-btn:hover{ border-color:var(--accent); color:var(--accent); }
 
 /* ---- Action grid ---- */
 .action-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
@@ -501,7 +503,7 @@ let workouts = [];    // allWorkouts filtered to whichever profile is active (be
 let dbApi = null;
 let usingLocal = false;
 
-const state = { view:'home', draft:null, historyOpenId:null, pickerOpen:false, pickerQuery:'', addingCustom:false, detailExId:null, me:null, viewingFriend:null, editingWorkoutId:null, editingStats:false, friendMsg:null, friendMsgOk:false };
+const state = { view:'home', draft:null, historyOpenId:null, pickerOpen:false, pickerQuery:'', addingCustom:false, detailExId:null, me:null, viewingFriend:null, editingWorkoutId:null, editingStats:false, friendMsg:null, friendMsgOk:false, chipInfoKey:null };
 
 function uid(){ return 'id_'+Math.random().toString(36).slice(2,10)+Date.now().toString(36); }
 function todayISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -1666,6 +1668,32 @@ function renderLastWorkoutWidget(){
     + '</div></div>';
 }
 
+/* Plain-language explanations for each of the six 7-day score chips —
+   surfaced via a tap-to-open info modal, since the one-word labels
+   (Overload especially) don't explain themselves. */
+const SCORE_CHIP_INFO = {
+  freq: { label:'Frequency', text:'How many of your muscle groups got trained at least twice this week — research points to ~2x/week per muscle group as the sweet spot for growth, so this is about spreading training across the week, not just counting workouts.' },
+  vol: { label:'Volume', text:'Working sets (strength) and/or minutes (cardio) this week compared against your own trailing 4-week average. Scores highest in a slight-overload zone — a bit above your usual, not a huge jump and not a plateau.' },
+  intensity: { label:'Intensity', text:'For lifting: how close your sets averaged to your goal\'s target effort (Strain or %1RM). For cardio: whether you stayed in the moderate-to-vigorous zone (Strain 4-8) that ACSM guidelines call for, rather than all-out effort every session.' },
+  overload: { label:'Overload', text:'Short for Progressive Overload — whether your estimated 1-rep-maxes have actually trended up over the last 5 weeks. This is the single most research-backed driver of strength and muscle gains: no gradual increase in demand, no adaptation. Scaled to your relative strength level so beginners and advanced lifters are held to different, realistic rates of gain.' },
+  consistency: { label:'Consistency', text:'How many of the last 4 weeks had at least one workout logged. Adherence over time is one of the strongest real-world predictors of results — the best program is the one you actually stick with.' },
+  recovery: { label:'Recovery', text:'Dings training with zero rest days across an entire week. Under-recovery is a real risk to progress and injury risk, not just "more is always better."' }
+};
+function scoreChip(value, key){
+  const info = SCORE_CHIP_INFO[key];
+  return '<div class="chip"><div class="chip-val">'+value+'</div>'
+    + '<div class="chip-key">'+info.label+' <button class="chip-info-btn" data-action="show-chip-info" data-key="'+key+'" aria-label="What is '+info.label+'?">i</button></div></div>';
+}
+function chipInfoModal(){
+  const info = SCORE_CHIP_INFO[state.chipInfoKey];
+  if(!info) return '';
+  return '<div class="modal-backdrop" data-action="close-chip-info">'
+    + '<div class="modal-card">'
+    + '<h3 style="margin:0 0 8px;font-size:17px">'+info.label+'</h3>'
+    + '<p class="my-code-hint" style="margin:0;">'+info.text+'</p>'
+    + '<button class="btn btn-primary" data-action="close-chip-info">Got it</button>'
+    + '</div></div>';
+}
 function renderHome(){
   if(!state.me) return renderOnboarding();
   const s = sevenDayScore();
@@ -1698,12 +1726,12 @@ function renderHome(){
   +   '<div class="gauge-wrap">'+gaugeSvg(s.total)+'<div class="gauge-value"><div class="gauge-num">'+s.total+'<span>/100</span></div>'
   +   '<div class="gauge-tag">'+(s.count===0?'No workouts logged yet':s.count+' workout'+(s.count===1?'':'s')+' this week')+'</div></div></div>'
   +   '<div class="chip-row">'
-  +     '<div class="chip"><div class="chip-val">'+s.freqScore+'</div><div class="chip-key">Frequency</div></div>'
-  +     '<div class="chip"><div class="chip-val">'+s.volScore+'</div><div class="chip-key">Volume</div></div>'
-  +     '<div class="chip"><div class="chip-val">'+s.intensityScore+'</div><div class="chip-key">Intensity</div></div>'
-  +     '<div class="chip"><div class="chip-val">'+s.overloadScore+'</div><div class="chip-key">Overload</div></div>'
-  +     '<div class="chip"><div class="chip-val">'+s.consistency+'</div><div class="chip-key">Consistency</div></div>'
-  +     '<div class="chip"><div class="chip-val">'+s.recovery+'</div><div class="chip-key">Recovery</div></div>'
+  +     scoreChip(s.freqScore, 'freq')
+  +     scoreChip(s.volScore, 'vol')
+  +     scoreChip(s.intensityScore, 'intensity')
+  +     scoreChip(s.overloadScore, 'overload')
+  +     scoreChip(s.consistency, 'consistency')
+  +     scoreChip(s.recovery, 'recovery')
   +   '</div>'
   + '</div>'
   + renderLastWorkoutWidget()
@@ -2349,7 +2377,7 @@ function render(){
   else if(state.view==='friends') html = renderFriends();
   else if(state.view==='feed') html = renderFeed();
   const showTabs = state.me && TAB_VIEWS.indexOf(state.view)>-1;
-  app.innerHTML = '<div class="shell">'+html+'</div>' + (showTabs ? renderTabBar() : '') + (state.editingStats ? statsModal() : '');
+  app.innerHTML = '<div class="shell">'+html+'</div>' + (showTabs ? renderTabBar() : '') + (state.editingStats ? statsModal() : '') + (state.chipInfoKey ? chipInfoModal() : '');
   const newShell = document.querySelector('.shell');
   if(newShell) newShell.scrollTop = scrollTop;
   _lastRenderedView = state.view;
@@ -2391,6 +2419,13 @@ document.getElementById('app').addEventListener('click', async function(e){
   }
   else if(action==='close-stats'){
     if(e.target===t){ state.editingStats = false; render(); }
+  }
+  else if(action==='show-chip-info'){
+    state.chipInfoKey = t.getAttribute('data-key');
+    render();
+  }
+  else if(action==='close-chip-info'){
+    if(e.target===t){ state.chipInfoKey = null; render(); }
   }
   else if(action==='save-stats'){
     const nameVal = document.getElementById('cs-name').value.trim();
