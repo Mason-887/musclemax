@@ -1538,24 +1538,96 @@ const GOAL_PRESCRIPTION = {
   maintain:  { compound:{sets:3, repLo:8,  repHi:10, rpe:7},   isolation:{sets:3, repLo:10, repHi:12, rpe:7}   }
 };
 function myGoalKey(){ return (myStats && myStats.goal && GOAL_PROFILES[myStats.goal]) ? myStats.goal : 'maintain'; }
-/* Which muscle groups most need today's session: recovered (>=48h
-   since last trained that group — the standard minimum turnaround
-   between sessions hitting the same muscle per ACSM/NSCA guidance)
-   and furthest behind this week's goal-adjusted set target. Falls
-   back to every group if literally everything was trained within 48h,
-   so the engine never comes up empty. */
-function groupsNeedingWork(){
-  const goalP = myGoalProfile();
-  const candidates = GROUP_ORDER.map(function(group){
-    const last = groupLastTrainedDate(group);
-    const daysSince = last ? daysAgo(last) : Infinity;
-    const target = (GROUP_WEEKLY_SET_TARGET[group]||10) * goalP.volumeMult;
-    const doneThisWeek = groupWeeklyVolume(group,0);
-    return { group:group, daysSince:daysSince, target:target, doneThisWeek:doneThisWeek, deficit:target-doneThisWeek, recovered:daysSince>=2 };
+/* Named split templates the engine tries to recognize in a person's
+   own training history — the standard structured splits used in
+   practice (Push/Pull/Legs, Upper/Lower, and a classic 5-day body-part
+   "bro split"). Core is deliberately left out of every template since
+   it's conventionally trained flexibly across whichever days rather
+   than defining a split day on its own. */
+const SPLIT_TEMPLATES = {
+  ppl: { label:'Push/Pull/Legs', days:[
+    { label:'Push Day', groups:['Chest','Shoulders','Triceps'] },
+    { label:'Pull Day', groups:['Back','Biceps'] },
+    { label:'Leg Day',  groups:['Quads','Hamstrings','Glutes','Calves'] }
+  ]},
+  upperLower: { label:'Upper/Lower', days:[
+    { label:'Upper Body', groups:['Chest','Back','Shoulders','Biceps','Triceps'] },
+    { label:'Lower Body', groups:['Quads','Hamstrings','Glutes','Calves'] }
+  ]},
+  broSplit: { label:'Body-Part Split', days:[
+    { label:'Chest Day',    groups:['Chest'] },
+    { label:'Back Day',     groups:['Back'] },
+    { label:'Shoulder Day', groups:['Shoulders'] },
+    { label:'Arm Day',      groups:['Biceps','Triceps'] },
+    { label:'Leg Day',      groups:['Quads','Hamstrings','Glutes','Calves'] }
+  ]}
+};
+function jaccard(groupSet, groupArr){
+  const b = {}; groupArr.forEach(function(g){ b[g]=true; });
+  const union = {}; let inter=0;
+  groupSet.forEach(function(g){ union[g]=true; if(b[g]) inter++; });
+  groupArr.forEach(function(g){ union[g]=true; });
+  const unionSize = Object.keys(union).length;
+  return unionSize ? inter/unionSize : 0;
+}
+function bestDayMatch(groupSet, days){
+  let best=null, bestScore=-1;
+  days.forEach(function(day){
+    const score = jaccard(groupSet, day.groups);
+    if(score>bestScore){ bestScore=score; best=day; }
   });
-  let pool = candidates.filter(function(c){ return c.recovered; });
-  if(!pool.length) pool = candidates;
-  return pool.sort(function(a,b){ return b.deficit-a.deficit; });
+  return { day:best, score:bestScore };
+}
+/* One entry per distinct date actually trained (merging same-date
+   workouts, as the scoring functions do), newest first, as a
+   Core-excluded set of groups hit — the "signature" the split
+   detector pattern-matches against. */
+function recentSessionSignatures(limit){
+  const byDate = {};
+  workouts.forEach(function(w){ (byDate[w.date] = byDate[w.date]||[]).push(w); });
+  return Object.keys(byDate).sort(function(a,b){ return a<b?1:-1; }).slice(0, limit||20).map(function(date){
+    const merged = { entries:[].concat.apply([], byDate[date].map(function(w){ return w.entries||[]; })) };
+    const gs = groupsHit(merged);
+    gs.delete('Core');
+    return { date:date, groups:gs };
+  }).filter(function(s){ return s.groups.size>0; });
+}
+/* Recognize which named split (if any) a person's actual sessions
+   look like they're following, by matching each recent session
+   against every template's days and averaging the best-match score
+   per template. Requires a reasonable amount of history and a decent
+   average match (>=0.55 Jaccard) before committing to a split — a
+   handful of inconsistent sessions shouldn't get force-fit into one. */
+function detectSplit(){
+  const sessions = recentSessionSignatures(20);
+  if(sessions.length < 3) return null;
+  let bestType=null, bestAvg=-1;
+  Object.keys(SPLIT_TEMPLATES).forEach(function(key){
+    const scores = sessions.map(function(s){ return bestDayMatch(s.groups, SPLIT_TEMPLATES[key].days).score; });
+    const avg = scores.reduce(function(a,b){ return a+b; },0)/scores.length;
+    if(avg>bestAvg){ bestAvg=avg; bestType=key; }
+  });
+  return bestAvg>=0.55 ? bestType : null;
+}
+/* Which day within a split is due next: whichever day's groups
+   haven't been trained in the longest, preferring one that's cleared
+   the 48h same-muscle recovery minimum (ACSM/NSCA) if any has. */
+function nextSplitDay(splitKey){
+  const days = SPLIT_TEMPLATES[splitKey].days;
+  const sessions = recentSessionSignatures(20);
+  const lastTrained = {};
+  sessions.forEach(function(s){
+    const m = bestDayMatch(s.groups, days);
+    if(m.score>=0.4 && (!lastTrained[m.day.label] || s.date>lastTrained[m.day.label])){
+      lastTrained[m.day.label] = s.date;
+    }
+  });
+  const ranked = days.map(function(day){
+    const d = lastTrained[day.label];
+    return { day:day, daysSince: d ? daysAgo(d) : Infinity };
+  }).sort(function(a,b){ return b.daysSince-a.daysSince; });
+  const recovered = ranked.filter(function(r){ return r.daysSince>=2; });
+  return (recovered[0] || ranked[0]).day;
 }
 /* Up to `count` exercises for a group: a compound first (bigger
    lifts are conventionally programmed before accessories, since they
@@ -1571,21 +1643,29 @@ function pickExercisesForGroup(group, count){
   }
   return byFamiliarity(compounds).concat(byFamiliarity(isolations)).slice(0, count||2);
 }
-/* The full suggested session: which groups, which exercises, and a
+/* The full suggested session: which day of the person's own detected
+   split is due, which exercises for its muscle groups, and a
    goal-calibrated sets x reps x RPE prescription for each, plus a
    cardio nudge when the goal calls for it and this week is short on
-   cardio minutes. */
+   cardio minutes. With too little history to recognize a personal
+   split yet, defaults to a Push/Pull/Legs rotation — the most common
+   general-purpose structured split — rather than guessing blind. */
 function suggestedWorkoutPlan(){
   const goalKey = myGoalKey();
   const presc = GOAL_PRESCRIPTION[goalKey];
-  const needed = groupsNeedingWork().slice(0,3);
+  const splitKey = detectSplit();
+  const effectiveSplit = splitKey || 'ppl';
+  const day = nextSplitDay(effectiveSplit);
+  const dayLabel = SPLIT_TEMPLATES[effectiveSplit].label+' &middot; '+day.label;
+  const groups = day.groups;
+  const perGroupCount = groups.length<=2 ? 2 : (groups.length===3 ? 2 : 1);
   const exercises = [];
-  needed.forEach(function(c){
-    pickExercisesForGroup(c.group, 2).forEach(function(ex){
+  groups.forEach(function(group){
+    pickExercisesForGroup(group, perGroupCount).forEach(function(ex){
       const p = presc[ex.type] || presc.compound;
       const rec = recommendation(ex.id);
       exercises.push({
-        exerciseId: ex.id, name: ex.name, group: c.group, type: ex.type,
+        exerciseId: ex.id, name: ex.name, group: group, type: ex.type,
         sets: p.sets, repLo: p.repLo, repHi: p.repHi, rpe: p.rpe,
         weight: rec ? rec.weight : null
       });
@@ -1599,7 +1679,7 @@ function suggestedWorkoutPlan(){
       cardioTip = Math.round(cardioTarget/7*1.5)+'-'+Math.round(cardioTarget/7*2.2)+' min of moderate cardio — '+Math.round(weeklyCardio)+' of the ~'+cardioTarget+' min/week ACSM guideline logged so far this week.';
     }
   }
-  return { goalKey:goalKey, groups:needed.map(function(c){return c.group;}), exercises:exercises, cardioTip:cardioTip };
+  return { goalKey:goalKey, dayLabel:dayLabel, groups:groups, exercises:exercises, cardioTip:cardioTip, splitDetected: !!splitKey };
 }
 
 /* ---------------- gauge svg ---------------- */
@@ -1696,12 +1776,16 @@ function renderSuggestedWorkout(){
     return '<div class="wk-ex-row"><span>'+item.name+'</span><span class="sets">'+planSetLabel(item)+(item.weight?' &middot; ~'+item.weight+' lb':'')+'</span></div>';
   }).join('');
   const cardioRow = plan.cardioTip ? '<div class="rec-hint" style="margin-top:10px;">Also: '+plan.cardioTip+'</div>' : '';
+  const splitNote = plan.splitDetected
+    ? 'Matches your usual training split.'
+    : 'Not enough history yet to detect your split — defaulting to a Push/Pull/Legs rotation.';
   return '<div class="wk-card suggested-workout-card">'
-    + '<div class="wk-top"><div><div class="wk-date">Suggested Workout</div><div class="wk-sub">For '+goalLabel+' &middot; '+groupChips+'</div></div></div>'
+    + '<div class="wk-top"><div><div class="wk-date">'+plan.dayLabel+'</div><div class="wk-sub">For '+goalLabel+' &middot; '+splitNote+'</div></div></div>'
+    + '<div class="wk-meta" style="margin-top:8px;">'+groupChips+'</div>'
     + '<div class="wk-detail" style="margin-top:12px; padding-top:0; border-top:none;">' + rows + '</div>'
     + cardioRow
     + '<button class="btn btn-primary" style="width:100%; margin-top:12px;" data-action="start-suggested-workout">Start This Workout</button>'
-    + '<p class="my-code-hint" style="margin:10px 0 0;">Picks whichever recovered muscle groups (48h+ since last trained) are furthest behind this week\'s target, prioritizing exercises you already have a weight history for. Sets/reps follow the standard NSCA strength-vs-hypertrophy-vs-endurance loading ranges for your goal.</p>'
+    + '<p class="my-code-hint" style="margin:10px 0 0;">Recognizes your recent Push/Pull/Legs, Upper/Lower or body-part split from your own workout history and picks whichever day in that rotation is due (recovered 48h+, least recently trained), prioritizing exercises you already have a weight history for. Sets/reps follow the standard NSCA strength-vs-hypertrophy-vs-endurance loading ranges for your goal.</p>'
     + '</div>';
 }
 function renderHome(){
