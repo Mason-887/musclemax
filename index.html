@@ -1038,6 +1038,15 @@ function groupsHit(w){
    than other small groups since they're notoriously slow-responding
    and conventionally programmed with more volume. */
 const GROUP_WEEKLY_SET_TARGET = { Chest:12, Back:14, Quads:12, Hamstrings:10, Glutes:10, Calves:12, Shoulders:12, Biceps:8, Triceps:8, Core:8 };
+/* Assumed weekly training frequency per group, used only for the
+   per-session fallback baseline below when there's no personal
+   history for that group yet. Small, fast-recovering groups (Calves,
+   Biceps, Triceps, Core) are conventionally trained more often per
+   week in smaller doses than large compound groups — dividing every
+   group's weekly target by a flat "twice a week" ignored that,
+   producing single-session targets like 6 sets of calves in one go,
+   more than most people would ever do as an accessory block. */
+const GROUP_ASSUMED_FREQUENCY = { Chest:2, Back:2, Quads:2, Hamstrings:2, Glutes:2, Calves:3, Shoulders:2, Biceps:3, Triceps:3, Core:3 };
 function groupSetsInWorkout(w, group){
   let sets=0;
   (w.entries||[]).forEach(function(en){
@@ -1052,7 +1061,7 @@ function groupSetsInWorkout(w, group){
    no history for that group yet. */
 function groupSessionBaseline(group, dateStr){
   const prior = workouts.filter(function(w){ const d=dateDiffDays(dateStr,w.date); return d>0 && d<=28 && groupSetsInWorkout(w,group)>0; });
-  if(!prior.length) return (GROUP_WEEKLY_SET_TARGET[group]||10)/2 * myGoalProfile().volumeMult;
+  if(!prior.length) return (GROUP_WEEKLY_SET_TARGET[group]||10)/(GROUP_ASSUMED_FREQUENCY[group]||2) * myGoalProfile().volumeMult;
   return prior.reduce(function(s,w){ return s+groupSetsInWorkout(w,group); },0)/prior.length;
 }
 /* Group-relative volume: each muscle group hit that day is scored
@@ -1530,6 +1539,18 @@ function goalRepRange(ex){
   const p = presc[ex.type] || presc.compound;
   return { lo:p.repLo, hi:p.repHi };
 }
+/* How many sets to recommend alongside the weight/reps target: the
+   goal's own prescription for that exercise type once a goal is set
+   (so the hint says "do 4 sets", not just what one set should look
+   like), falling back to however many sets were actually logged last
+   time when no goal is set — matching this app's "nothing changes
+   until you opt in" pattern for goal-driven behavior. */
+function goalSetCount(ex, fallback){
+  if(!myStats || !myStats.goal) return fallback;
+  const presc = GOAL_PRESCRIPTION[myGoalKey()];
+  const p = presc[ex.type] || presc.compound;
+  return p.sets;
+}
 function recommendation(exerciseId){
   const ex = exById(exerciseId);
   if(!ex || ex.cardio) return null;
@@ -1539,6 +1560,7 @@ function recommendation(exerciseId){
   const sets = last.sets||[];
   if(!sets.length) return null;
   const range = goalRepRange(ex);
+  const setCount = goalSetCount(ex, sets.length);
   const topWeight = Math.max.apply(null, sets.map(function(s){ return s.weight||0; }));
   const topSets = sets.filter(function(s){ return s.weight===topWeight; });
   const allHitTop = topSets.length>0 && topSets.every(function(s){ return s.reps>=range.hi; });
@@ -1549,7 +1571,7 @@ function recommendation(exerciseId){
 
   if(anyFailedLow || overloaded){
     const w = roundToStep(topWeight*0.95, ex.type==='compound'?2.5:1);
-    return { weight:w, reps:range.lo, note:'Recovery dip last time — easing the load ~5% and resetting to the bottom of your rep range.' };
+    return { weight:w, reps:range.lo, sets:setCount, note:'Recovery dip last time — easing the load ~5% and resetting to the bottom of your rep range.' };
   }
   if(allHitTop && (avgR===null || avgR<=8.3)){
     const baseBump = ex.type==='compound' ? 2.5 : (topWeight>=50?2.5:1);
@@ -1557,11 +1579,11 @@ function recommendation(exerciseId){
     const bump = Math.max(0.5, Math.round(baseBump*mult*2)/2);
     const w = roundToStep(topWeight+bump, 0.5);
     const levelNote = mult>1 ? ' You\'re early on this lift, so progress can come faster here.' : mult<1 ? ' Smaller, steadier jumps make sense at your current strength level.' : '';
-    return { weight:w, reps:range.lo, note:'Every set hit '+range.hi+'+ reps comfortably — add '+bump+' lb and drop back to '+range.lo+' reps.'+levelNote };
+    return { weight:w, reps:range.lo, sets:setCount, note:'Every set hit '+range.hi+'+ reps comfortably — add '+bump+' lb and drop back to '+range.lo+' reps.'+levelNote };
   }
   const bestSet = sets.reduce(function(m,s){ return s.reps>m.reps?s:m; }, sets[0]);
   const nextReps = Math.min(range.hi, (bestSet.reps||range.lo)+1);
-  return { weight:topWeight, reps:nextReps, note:'Same weight as last time — chase '+nextReps+' reps before adding load.' };
+  return { weight:topWeight, reps:nextReps, sets:setCount, note:'Same weight as last time — chase '+nextReps+' reps before adding load.' };
 }
 
 function lastPerformedSummary(exerciseId){
@@ -2236,7 +2258,7 @@ function renderExerciseCard(entry, idx){
     + '<div class="ex-card-head"><div><h3>'+ex.name+'</h3><span class="ex-group-tag">'+ex.group+'</span></div>'
     + '<button class="ex-remove" data-action="remove-exercise" data-idx="'+idx+'">remove</button></div>';
   if(rec){
-    html += '<div class="rec-hint"><b>Suggested next:</b> '+rec.weight+' lb × '+rec.reps+'. '+rec.note+'</div>';
+    html += '<div class="rec-hint"><b>Suggested next:</b> '+rec.sets+' set'+(rec.sets===1?'':'s')+' of '+rec.weight+' lb × '+rec.reps+'. '+rec.note+'</div>';
   }
   if(ex.cardio){
     html += '<div class="set-labels"><span></span><span>Minutes</span><span>Distance (mi)</span><span>Strain</span><span></span></div><div class="set-table">';
@@ -2600,15 +2622,17 @@ document.getElementById('app').addEventListener('click', async function(e){
   else if(action==='pick-exercise'){
     const id = t.getAttribute('data-id');
     const ex = exById(id);
-    let seed;
+    let seed, setCount = 1;
     if(ex.cardio){
       seed = {minutes:null, distance:null, rpe:null};
     } else {
       const rec = recommendation(id);
       seed = rec ? {weight:rec.weight, reps:rec.reps, rpe:null} : {weight:null, reps:ex.repLow, rpe:null};
+      if(rec && rec.sets) setCount = rec.sets;
     }
-    seed.loggedAt = Date.now();
-    state.draft.entries.push({ exerciseId:id, sets:[Object.assign({}, seed)] });
+    const newSets = [];
+    for(let i=0;i<setCount;i++){ newSets.push(Object.assign({}, seed, { loggedAt:Date.now() })); }
+    state.draft.entries.push({ exerciseId:id, sets:newSets });
     state.pickerOpen=false; state.pickerQuery='';
     render();
   }
