@@ -1981,27 +1981,31 @@ function scoreTrendSvg(){
   if(points.length<2){
     return '<div class="trend-card"><div class="gauge-label" style="margin-bottom:6px">Score Trend &middot; Last 30 Days</div><div class="empty-state" style="padding:16px 0;">Log a few more workouts to see a trend.</div></div>';
   }
-  const W=560,H=150,PAD=30;
-  const stepX = (W-PAD*2)/(points.length-1);
-  const pts = points.map(function(p,i){
-    const x = PAD+i*stepX;
-    const y = H-PAD - (p.score/100)*(H-PAD*2);
-    return [x,y];
-  });
+  const W=560,H=168, PADL=32,PADR=14,PADTOP=22,PADBOT=26;
+  const plotW = W-PADL-PADR, plotH = H-PADTOP-PADBOT;
+  const stepX = points.length>1 ? plotW/(points.length-1) : 0;
+  const yFor = function(score){ return PADTOP + plotH - (score/100)*plotH; };
+  const pts = points.map(function(p,i){ return [PADL+i*stepX, yFor(p.score)]; });
   const d = pts.map(function(p,i){ return (i===0?'M':'L')+p[0].toFixed(1)+' '+p[1].toFixed(1); }).join(' ');
+  // Label every point when there's room; otherwise thin them out, but
+  // always keep the first and last so the start/end values are readable.
+  const labelEvery = Math.max(1, Math.ceil(24/Math.max(stepX,1)));
   const dots = pts.map(function(p,i){
     const s = points[i].score;
     const color = s>=75?'var(--good)':(s>=50?'var(--warn)':'var(--bad)');
-    return '<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="3.6" fill="'+color+'"><title>'+fmtDate(points[i].date)+': '+s+'/100</title></circle>';
+    const showLabel = i%labelEvery===0 || i===points.length-1;
+    const labelY = p[1]<PADTOP+12 ? p[1]+13 : p[1]-8;
+    return '<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="3.6" fill="'+color+'"><title>'+fmtDate(points[i].date)+': '+s+'/100</title></circle>'
+      + (showLabel ? '<text x="'+p[0].toFixed(1)+'" y="'+labelY.toFixed(1)+'" text-anchor="middle" font-size="10.5" font-family="var(--font-mono)" font-weight="600" fill="'+color+'">'+s+'</text>' : '');
   }).join('');
-  const grid = [25,50,75].map(function(v){
-    const y = (H-PAD-(v/100)*(H-PAD*2)).toFixed(1);
-    return '<line x1="'+PAD+'" y1="'+y+'" x2="'+(W-PAD)+'" y2="'+y+'" stroke="var(--border)" stroke-width="1" stroke-dasharray="3,3"/>';
+  const grid = [0,25,50,75,100].map(function(v){
+    const y = yFor(v).toFixed(1);
+    return '<line x1="'+PADL+'" y1="'+y+'" x2="'+(W-PADR)+'" y2="'+y+'" stroke="var(--border)" stroke-width="1" stroke-dasharray="3,3"/>'
+      + '<text x="'+(PADL-8)+'" y="'+(Number(y)+3.5).toFixed(1)+'" text-anchor="end" font-size="9.5" font-family="var(--font-mono)" fill="var(--text-dim)">'+v+'</text>';
   }).join('');
   return '<div class="trend-card"><div class="gauge-label" style="margin-bottom:10px">Score Trend &middot; Last 30 Days</div>'
     + '<svg class="trend-svg" viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg">'
     + grid
-    + '<line x1="'+PAD+'" y1="'+(H-PAD)+'" x2="'+(W-PAD)+'" y2="'+(H-PAD)+'" stroke="var(--border)" stroke-width="1"/>'
     + '<path d="'+d+'" fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>'
     + dots
     + '</svg></div>';
