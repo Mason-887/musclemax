@@ -496,7 +496,7 @@ let reactions = {}; // workoutId -> { emoji: [reactor names] }
 let allFeedEvents = []; // milestone posts (e.g. streak notifications) that aren't tied to one workout
 let allProfiles = []; // every name anyone has ever set up — the directory searched for adding friends
 let friendships = []; // one doc per pair: { id, from, to, fromName, toName, status:'pending'|'accepted', ts }
-let myStats = null; // { heightIn, weightLb, bodyFatPct, sex } — optional, used to make e1RM/scoring more accurate
+let myStats = null; // { heightIn, weightLb, bodyFatPct, sex, goal } — optional, used to make e1RM/scoring more accurate
 let workouts = [];    // allWorkouts filtered to whichever profile is active (below)
 let dbApi = null;
 let usingLocal = false;
@@ -842,6 +842,36 @@ function myAvgStrengthLevel(){
   return levels.reduce(function(a,b){ return a+b; },0)/levels.length;
 }
 
+/* Training goal calibrates the same four levers research treats
+   differently by objective: how much weekly volume to target per
+   muscle group, how heavy sets should feel (ideal Strain / %1RM),
+   and how aggressively to bump weight on progression.
+   - Build Muscle: higher volume (closer to MAV), moderate intensity —
+     classic hypertrophy programming.
+   - Get Stronger: lower volume, very high intensity, bigger load jumps
+     — a powerlifting-style bias toward near-max singles/triples.
+   - Lose Fat / Lean Out: baseline volume, moderate intensity — keep
+     lifting hard enough to preserve muscle while cardio/diet do the
+     rest; smaller load jumps since the priority isn't chasing PRs.
+   - Improve Endurance: lower load intensity, slightly reduced strength
+     volume (cardio work isn't tracked here but is presumably filling
+     the gap), smaller jumps.
+   - Stay in Shape: moderate everything — general health, not chasing
+     a specific adaptation. Also the default when no goal is set, tuned
+     to match this app's pre-goal-feature behavior exactly, so picking
+     no goal never changes anything. */
+const GOAL_PROFILES = {
+  muscle:    { label:'Build Muscle',         volumeMult:1.15, idealStrain:8.5, idealPct:0.82, bumpMult:1.0  },
+  strength:  { label:'Get Stronger',         volumeMult:0.85, idealStrain:9.2, idealPct:0.88, bumpMult:1.2  },
+  fatloss:   { label:'Lose Fat / Lean Out',  volumeMult:1.0,  idealStrain:7.75,idealPct:0.78, bumpMult:0.8  },
+  endurance: { label:'Improve Endurance',    volumeMult:0.85, idealStrain:7.0, idealPct:0.70, bumpMult:0.8  },
+  maintain:  { label:'Stay in Shape',        volumeMult:1.0,  idealStrain:8.25,idealPct:0.82, bumpMult:1.0  }
+};
+function myGoalProfile(){
+  const key = myStats && myStats.goal;
+  return (key && GOAL_PROFILES[key]) ? GOAL_PROFILES[key] : GOAL_PROFILES.maintain;
+}
+
 /* ---------------- storage ---------------- */
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyABmaCakknru15ejfvrCUHpVLT42izFjy4",
@@ -1016,7 +1046,7 @@ function groupSetsInWorkout(w, group){
    no history for that group yet. */
 function groupSessionBaseline(group, dateStr){
   const prior = workouts.filter(function(w){ const d=dateDiffDays(dateStr,w.date); return d>0 && d<=28 && groupSetsInWorkout(w,group)>0; });
-  if(!prior.length) return (GROUP_WEEKLY_SET_TARGET[group]||10)/2;
+  if(!prior.length) return (GROUP_WEEKLY_SET_TARGET[group]||10)/2 * myGoalProfile().volumeMult;
   return prior.reduce(function(s,w){ return s+groupSetsInWorkout(w,group); },0)/prior.length;
 }
 /* Group-relative volume: each muscle group hit that day is scored
@@ -1172,13 +1202,14 @@ function sevenDayScore(){
       });
     });
   });
+  const goalP = myGoalProfile();
   let intensityScore;
   if(rpeN){
     const avg = rpeSum/rpeN;
-    intensityScore = clamp(100 - Math.abs(avg-8.25)*28, 0, 100);
+    intensityScore = clamp(100 - Math.abs(avg-goalP.idealStrain)*28, 0, 100);
   } else if(pctN){
     const avgPct = pctSum/pctN;
-    intensityScore = clamp(100 - Math.abs(avgPct-0.82)*220, 0, 100);
+    intensityScore = clamp(100 - Math.abs(avgPct-goalP.idealPct)*220, 0, 100);
   } else {
     intensityScore = recent.length ? 60 : 0;
   }
@@ -1236,15 +1267,16 @@ function workoutDayScoreParts(dateStr){
       else if(best>0 && s.weight){ pctSum += effectiveWeight(en.exerciseId,s.weight)/best; pctN++; }
     });
   });
+  const goalP = myGoalProfile();
   let intensityScore, strainAvg=null, pctAvg=null;
-  if(strainN){ strainAvg = strainSum/strainN; intensityScore = clamp(100-Math.abs(strainAvg-8.25)*28, 0, 100); }
-  else if(pctN){ pctAvg = pctSum/pctN; intensityScore = clamp(100-Math.abs(pctAvg-0.82)*220, 0, 100); }
+  if(strainN){ strainAvg = strainSum/strainN; intensityScore = clamp(100-Math.abs(strainAvg-goalP.idealStrain)*28, 0, 100); }
+  else if(pctN){ pctAvg = pctSum/pctN; intensityScore = clamp(100-Math.abs(pctAvg-goalP.idealPct)*220, 0, 100); }
   else intensityScore = 60;
 
   const total = Math.round(volScore*0.5 + intensityScore*0.5);
   return {
     total, volScore:Math.round(volScore), intensityScore:Math.round(intensityScore),
-    strengthVol, cardioMin, avgSessionCardioMin, strainAvg, pctAvg,
+    strengthVol, cardioMin, avgSessionCardioMin, strainAvg, pctAvg, goalP,
     groupBreakdown: groupVol ? groupVol.breakdown : null
   };
 }
@@ -1288,18 +1320,19 @@ function workoutRecommendation(dateStr){
     }
   }
   if(p.intensityScore < 75){
+    const goalP = p.goalP || myGoalProfile();
     if(p.strainAvg!==null){
-      if(p.strainAvg < 8.25){
-        tips.push('Intensity: average Strain was '+p.strainAvg.toFixed(1)+' — pushing your last set or two closer to an 8-9 (a couple reps shy of failure) would move this into the green.');
+      if(p.strainAvg < goalP.idealStrain){
+        tips.push('Intensity: average Strain was '+p.strainAvg.toFixed(1)+' — for your '+goalP.label.toLowerCase()+' goal, pushing closer to '+goalP.idealStrain.toFixed(1)+' would move this into the green.');
       } else {
-        tips.push('Intensity: average Strain was '+p.strainAvg.toFixed(1)+' — right at the edge. Backing off slightly protects recovery without costing much here.');
+        tips.push('Intensity: average Strain was '+p.strainAvg.toFixed(1)+' — a bit above the '+goalP.idealStrain.toFixed(1)+' target for your goal. Backing off slightly protects recovery without costing much here.');
       }
     } else if(p.pctAvg!==null){
-      const pct = Math.round(p.pctAvg*100);
-      if(p.pctAvg < 0.82){
-        tips.push('Intensity: sets averaged about '+pct+'% of your best lift — working closer to 80-85% (or logging Strain instead) would score higher.');
+      const pct = Math.round(p.pctAvg*100), idealPct = Math.round(goalP.idealPct*100);
+      if(p.pctAvg < goalP.idealPct){
+        tips.push('Intensity: sets averaged about '+pct+'% of your best lift — working closer to '+idealPct+'% (or logging Strain instead) would score higher for your goal.');
       } else {
-        tips.push('Intensity: sets averaged about '+pct+'% of your best lift — very heavy. A touch lighter is fine and easier to recover from.');
+        tips.push('Intensity: sets averaged about '+pct+'% of your best lift — above the ~'+idealPct+'% target for your goal. A touch lighter is fine and easier to recover from.');
       }
     } else {
       tips.push('Intensity: log a Strain rating (1-10) on your sets — right now there\'s nothing to score effort against, so it defaults to neutral.');
@@ -1421,7 +1454,8 @@ function groupWeeklyVolume(group, weeksAgo){
    bodyweight on file, or for lifts outside the four with published
    standards, using the lifter's overall average level instead. */
 function progressionBumpMultiplier(exerciseId){
-  if(!myStats || !myStats.weightLb) return 1;
+  const goalMult = myGoalProfile().bumpMult;
+  if(!myStats || !myStats.weightLb) return goalMult;
   let levelIdx = null;
   const table = STRENGTH_STANDARDS[exerciseId];
   if(table){
@@ -1430,12 +1464,13 @@ function progressionBumpMultiplier(exerciseId){
   }
   if(levelIdx===null){
     const avg = myAvgStrengthLevel();
-    if(avg===null) return 1;
+    if(avg===null) return goalMult;
     levelIdx = Math.round(avg);
   }
-  if(levelIdx<=1) return 1.8;
-  if(levelIdx>=4) return 0.5;
-  return 1;
+  let mult = 1;
+  if(levelIdx<=1) mult = 1.8;
+  else if(levelIdx>=4) mult = 0.5;
+  return mult*goalMult;
 }
 function recommendation(exerciseId){
   const ex = exById(exerciseId);
@@ -1586,7 +1621,9 @@ function renderHome(){
   + pausedHtml
   + streakCard
   + '<div class="gauge-card">'
-  +   '<div class="gauge-head"><span class="gauge-label">Last 7 Days</span>'+(usingLocal?'<span class="gauge-label" title="Saved on this device only">On-device</span>':'')+'</div>'
+  +   '<div class="gauge-head"><span class="gauge-label">Last 7 Days</span>'
+  +     (myStats && myStats.goal && GOAL_PROFILES[myStats.goal] ? '<span class="gauge-label" style="color:var(--accent); cursor:pointer;" data-action="edit-name" title="Tap to change your goal">'+GOAL_PROFILES[myStats.goal].label+'</span>' : (usingLocal?'<span class="gauge-label" title="Saved on this device only">On-device</span>':''))
+  +   '</div>'
   +   '<div class="gauge-wrap">'+gaugeSvg(s.total)+'<div class="gauge-value"><div class="gauge-num">'+s.total+'<span>/100</span></div>'
   +   '<div class="gauge-tag">'+(s.count===0?'No workouts logged yet':s.count+' workout'+(s.count===1?'':'s')+' this week')+'</div></div></div>'
   +   '<div class="chip-row">'
@@ -2170,15 +2207,19 @@ function customModal(){
 
 function statsModal(){
   const s = myStats || {};
+  const goalOptions = Object.keys(GOAL_PROFILES).map(function(k){
+    return '<option value="'+k+'"'+(s.goal===k?' selected':'')+'>'+GOAL_PROFILES[k].label+'</option>';
+  }).join('');
   return '<div class="modal-backdrop" data-action="close-stats">'
     + '<div class="modal-card">'
     + '<h3 style="margin:0 0 4px;font-size:17px">Your Profile</h3>'
     + '<div><label>Name</label><input id="cs-name" value="'+(state.me||'').replace(/"/g,'&quot;')+'"/></div>'
+    + '<div><label>Goal</label><select id="cs-goal"><option value="">Not set</option>'+goalOptions+'</select></div>'
     + '<div class="modal-row2"><div><label>Height (in)</label><input id="cs-height" type="number" placeholder="e.g. 70" value="'+(s.heightIn||'')+'"/></div>'
     + '<div><label>Weight (lb)</label><input id="cs-weight" type="number" placeholder="e.g. 180" value="'+(s.weightLb||'')+'"/></div></div>'
     + '<div class="modal-row2"><div><label>Body Fat % (est.)</label><input id="cs-bf" type="number" placeholder="optional" value="'+(s.bodyFatPct||'')+'"/></div>'
     + '<div><label>Sex</label><select id="cs-sex"><option value="">Prefer not to say</option><option value="male"'+(s.sex==='male'?' selected':'')+'>Male</option><option value="female"'+(s.sex==='female'?' selected':'')+'>Female</option></select></div></div>'
-    + '<p class="my-code-hint" style="margin:-2px 0 0;">Optional, and only used to sharpen your own numbers — fixes bodyweight-exercise tracking (pull-ups/push-ups/dips) and calibrates Progressive Overload and weight-jump suggestions to published relative-strength standards. Nothing changes if you skip this.</p>'
+    + '<p class="my-code-hint" style="margin:-2px 0 0;">All optional, and only used to sharpen your own numbers. Goal calibrates your target volume, intensity and how aggressively weight-jump suggestions progress; height/weight/body fat/sex fixes bodyweight-exercise tracking and calibrates Progressive Overload to published relative-strength standards. Nothing changes if you skip any of it.</p>'
     + '<button class="btn btn-primary" data-action="save-stats">Save</button>'
     + '</div></div>';
 }
@@ -2293,9 +2334,10 @@ document.getElementById('app').addEventListener('click', async function(e){
     const weightLb = +document.getElementById('cs-weight').value || null;
     const bodyFatPct = +document.getElementById('cs-bf').value || null;
     const sex = document.getElementById('cs-sex').value || null;
+    const goal = document.getElementById('cs-goal').value || null;
     state.editingStats = false;
     render();
-    saveMyStats({ heightIn:heightIn, weightLb:weightLb, bodyFatPct:bodyFatPct, sex:sex });
+    saveMyStats({ heightIn:heightIn, weightLb:weightLb, bodyFatPct:bodyFatPct, sex:sex, goal:goal });
   }
   else if(action==='add-friend-by-name'){
     const input = document.getElementById('friend-username');
