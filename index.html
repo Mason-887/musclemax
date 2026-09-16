@@ -195,6 +195,8 @@ a{ color:var(--accent); }
 .streak-dashboard-card .streak-text-sub{ font-size:12px; color:var(--text-dim); margin-top:2px; }
 .feed-streak-badge{ margin-left:auto; }
 .wk-detail{ margin-top:12px; padding-top:12px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:10px; }
+.suggested-workout-card{ cursor:default; border-color:var(--accent); }
+.suggested-workout-card:hover{ box-shadow:var(--shadow-1); }
 .wk-ex-row{ display:flex; justify-content:space-between; font-size:13.5px; gap:10px; }
 .wk-ex-row .sets{ color:var(--text-dim); font-family:var(--font-mono); font-size:12.5px; text-align:right; }
 .empty-state{ text-align:center; padding:40px 20px; color:var(--text-dim); font-size:14px; }
@@ -1518,6 +1520,88 @@ function lastPerformedSummary(exerciseId){
   return last.sets.length+'×'+top.reps+' @ '+top.weight+' lb';
 }
 
+/* ---------------- suggested workout engine ---------------- */
+/* Sets/reps/intensity by goal, following the NSCA loading continuum
+   (Baechle & Earle, Essentials of Strength Training and Conditioning):
+   roughly 1-6 reps at 85-100% 1RM for max strength, 6-12 reps at
+   67-85% for hypertrophy, 12-20+ reps at <67% for muscular endurance.
+   RPE targets mirror the goal's own idealStrain from GOAL_PROFILES so
+   the plan and the scoring agree with each other. Compounds and
+   isolations get separate prescriptions since accessories are
+   conventionally kept a bit higher-rep than the main lift even on a
+   strength-focused day. */
+const GOAL_PRESCRIPTION = {
+  muscle:    { compound:{sets:4, repLo:8,  repHi:10, rpe:7.5}, isolation:{sets:3, repLo:10, repHi:12, rpe:7.5} },
+  strength:  { compound:{sets:4, repLo:3,  repHi:5,  rpe:8.5}, isolation:{sets:3, repLo:8,  repHi:10, rpe:7}   },
+  fatloss:   { compound:{sets:3, repLo:10, repHi:12, rpe:7},   isolation:{sets:3, repLo:12, repHi:15, rpe:7}   },
+  endurance: { compound:{sets:3, repLo:12, repHi:15, rpe:6.5}, isolation:{sets:2, repLo:15, repHi:20, rpe:6}   },
+  maintain:  { compound:{sets:3, repLo:8,  repHi:10, rpe:7},   isolation:{sets:3, repLo:10, repHi:12, rpe:7}   }
+};
+function myGoalKey(){ return (myStats && myStats.goal && GOAL_PROFILES[myStats.goal]) ? myStats.goal : 'maintain'; }
+/* Which muscle groups most need today's session: recovered (>=48h
+   since last trained that group — the standard minimum turnaround
+   between sessions hitting the same muscle per ACSM/NSCA guidance)
+   and furthest behind this week's goal-adjusted set target. Falls
+   back to every group if literally everything was trained within 48h,
+   so the engine never comes up empty. */
+function groupsNeedingWork(){
+  const goalP = myGoalProfile();
+  const candidates = GROUP_ORDER.map(function(group){
+    const last = groupLastTrainedDate(group);
+    const daysSince = last ? daysAgo(last) : Infinity;
+    const target = (GROUP_WEEKLY_SET_TARGET[group]||10) * goalP.volumeMult;
+    const doneThisWeek = groupWeeklyVolume(group,0);
+    return { group:group, daysSince:daysSince, target:target, doneThisWeek:doneThisWeek, deficit:target-doneThisWeek, recovered:daysSince>=2 };
+  });
+  let pool = candidates.filter(function(c){ return c.recovered; });
+  if(!pool.length) pool = candidates;
+  return pool.sort(function(a,b){ return b.deficit-a.deficit; });
+}
+/* Up to `count` exercises for a group: a compound first (bigger
+   lifts are conventionally programmed before accessories, since they
+   demand the most out of fresh muscle), then isolations to round it
+   out. Exercises already in the person's history are preferred, since
+   that's what gives recommendation() a real weight to suggest. */
+function pickExercisesForGroup(group, count){
+  const pool = allExercises().filter(function(e){ return e.group===group && !e.cardio; });
+  const compounds = pool.filter(function(e){ return e.type==='compound'; });
+  const isolations = pool.filter(function(e){ return e.type==='isolation'; });
+  function byFamiliarity(list){
+    return list.slice().sort(function(a,b){ return exerciseHistory(b.id).length - exerciseHistory(a.id).length; });
+  }
+  return byFamiliarity(compounds).concat(byFamiliarity(isolations)).slice(0, count||2);
+}
+/* The full suggested session: which groups, which exercises, and a
+   goal-calibrated sets x reps x RPE prescription for each, plus a
+   cardio nudge when the goal calls for it and this week is short on
+   cardio minutes. */
+function suggestedWorkoutPlan(){
+  const goalKey = myGoalKey();
+  const presc = GOAL_PRESCRIPTION[goalKey];
+  const needed = groupsNeedingWork().slice(0,3);
+  const exercises = [];
+  needed.forEach(function(c){
+    pickExercisesForGroup(c.group, 2).forEach(function(ex){
+      const p = presc[ex.type] || presc.compound;
+      const rec = recommendation(ex.id);
+      exercises.push({
+        exerciseId: ex.id, name: ex.name, group: c.group, type: ex.type,
+        sets: p.sets, repLo: p.repLo, repHi: p.repHi, rpe: p.rpe,
+        weight: rec ? rec.weight : null
+      });
+    });
+  });
+  let cardioTip = null;
+  if(goalKey==='fatloss' || goalKey==='endurance'){
+    const weeklyCardio = entriesInWindow(7).reduce(function(s,w){ return s+cardioMinutes(w); },0);
+    const cardioTarget = 150; // ACSM: >=150 min/week moderate-intensity aerobic activity
+    if(weeklyCardio < cardioTarget*0.6){
+      cardioTip = Math.round(cardioTarget/7*1.5)+'-'+Math.round(cardioTarget/7*2.2)+' min of moderate cardio — '+Math.round(weeklyCardio)+' of the ~'+cardioTarget+' min/week ACSM guideline logged so far this week.';
+    }
+  }
+  return { goalKey:goalKey, groups:needed.map(function(c){return c.group;}), exercises:exercises, cardioTip:cardioTip };
+}
+
 /* ---------------- gauge svg ---------------- */
 function gaugeSvg(score){
   const R=120, CX=150, CY=150;
@@ -1595,6 +1679,31 @@ function renderLastWorkoutWidget(){
     + '</div></div>';
 }
 
+/* One-line rep-range label, e.g. "4x8-10 @ RPE 7.5" — RPE trimmed to
+   a whole number when it lands on one, otherwise shown to one decimal
+   so 8.5 doesn't render as 8.5000000001-style noise from float math. */
+function planSetLabel(item){
+  const rpe = Math.round(item.rpe*2)/2;
+  const rpeStr = rpe===Math.round(rpe) ? rpe.toFixed(0) : rpe.toFixed(1);
+  return item.sets+'&times;'+item.repLo+'-'+item.repHi+' @ RPE '+rpeStr;
+}
+function renderSuggestedWorkout(){
+  const plan = suggestedWorkoutPlan();
+  if(!plan.exercises.length) return '';
+  const goalLabel = GOAL_PROFILES[plan.goalKey].label;
+  const groupChips = plan.groups.map(function(g){ return '<span class="group-chip">'+g+'</span>'; }).join('');
+  const rows = plan.exercises.map(function(item){
+    return '<div class="wk-ex-row"><span>'+item.name+'</span><span class="sets">'+planSetLabel(item)+(item.weight?' &middot; ~'+item.weight+' lb':'')+'</span></div>';
+  }).join('');
+  const cardioRow = plan.cardioTip ? '<div class="rec-hint" style="margin-top:10px;">Also: '+plan.cardioTip+'</div>' : '';
+  return '<div class="wk-card suggested-workout-card">'
+    + '<div class="wk-top"><div><div class="wk-date">Suggested Workout</div><div class="wk-sub">For '+goalLabel+' &middot; '+groupChips+'</div></div></div>'
+    + '<div class="wk-detail" style="margin-top:12px; padding-top:0; border-top:none;">' + rows + '</div>'
+    + cardioRow
+    + '<button class="btn btn-primary" style="width:100%; margin-top:12px;" data-action="start-suggested-workout">Start This Workout</button>'
+    + '<p class="my-code-hint" style="margin:10px 0 0;">Picks whichever recovered muscle groups (48h+ since last trained) are furthest behind this week\'s target, prioritizing exercises you already have a weight history for. Sets/reps follow the standard NSCA strength-vs-hypertrophy-vs-endurance loading ranges for your goal.</p>'
+    + '</div>';
+}
 function renderHome(){
   if(!state.me) return renderOnboarding();
   const s = sevenDayScore();
@@ -1635,6 +1744,7 @@ function renderHome(){
   +     '<div class="chip"><div class="chip-val">'+s.recovery+'</div><div class="chip-key">Recovery</div></div>'
   +   '</div>'
   + '</div>'
+  + (viewing ? '' : renderSuggestedWorkout())
   + renderLastWorkoutWidget()
   + (viewing ? '' : '<div class="action-grid">'
   +   '<button class="action-card primary" data-action="new-workout"><div class="glyph"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg></div><h3>Start Workout</h3><p>Log sets, reps &amp; weight as you lift.</p></button>'
@@ -2402,6 +2512,18 @@ document.getElementById('app').addEventListener('click', async function(e){
   }
   else if(action==='new-workout'){ state.draft={date:todayISO(), entries:[], cardioOnly:false, startedAt:Date.now()}; state.pickerOpen=true; state.pickerQuery=''; state.view='workout'; render(); }
   else if(action==='new-cardio'){ state.draft={date:todayISO(), entries:[], cardioOnly:true, startedAt:Date.now()}; state.pickerOpen=true; state.pickerQuery=''; state.view='workout'; render(); }
+  else if(action==='start-suggested-workout'){
+    const plan = suggestedWorkoutPlan();
+    const entries = plan.exercises.map(function(item){
+      const sets = [];
+      for(let i=0;i<item.sets;i++){ sets.push({ weight:item.weight, reps:item.repLo, rpe:null, loggedAt:Date.now() }); }
+      return { exerciseId:item.exerciseId, sets:sets };
+    });
+    state.draft = { date:todayISO(), entries:entries, cardioOnly:false, startedAt:Date.now() };
+    state.pickerOpen = false; state.pickerQuery='';
+    state.view = 'workout';
+    render();
+  }
   else if(action==='view-history'){ state.historyOpenId=null; state.view='history'; render(); }
   else if(action==='go-tab'){
     if(state.viewingFriend){ state.viewingFriend=null; refreshScope(); }
