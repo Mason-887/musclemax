@@ -1474,6 +1474,19 @@ function progressionBumpMultiplier(exerciseId){
   else if(levelIdx>=4) mult = 0.5;
   return mult*goalMult;
 }
+/* The rep range a recommendation should target: the exercise's own
+   library range by default, or — once a goal is set — the goal's
+   rep prescription for that exercise's type. Without this, the
+   "Suggested next" hint could tell someone chasing hypertrophy
+   (8-10 reps) to drop back to 5 reps just because that's bench
+   press's own hardcoded low-rep default, contradicting the goal-based
+   Suggested Workout card sitting right above it. */
+function goalRepRange(ex){
+  if(!myStats || !myStats.goal) return { lo:ex.repLow, hi:ex.repHigh };
+  const presc = GOAL_PRESCRIPTION[myGoalKey()];
+  const p = presc[ex.type] || presc.compound;
+  return { lo:p.repLo, hi:p.repHi };
+}
 function recommendation(exerciseId){
   const ex = exById(exerciseId);
   if(!ex || ex.cardio) return null;
@@ -1482,17 +1495,18 @@ function recommendation(exerciseId){
   const last = hist[hist.length-1];
   const sets = last.sets||[];
   if(!sets.length) return null;
+  const range = goalRepRange(ex);
   const topWeight = Math.max.apply(null, sets.map(function(s){ return s.weight||0; }));
   const topSets = sets.filter(function(s){ return s.weight===topWeight; });
-  const allHitTop = topSets.length>0 && topSets.every(function(s){ return s.reps>=ex.repHigh; });
+  const allHitTop = topSets.length>0 && topSets.every(function(s){ return s.reps>=range.hi; });
   const rpes = sets.map(function(s){ return s.rpe; }).filter(Boolean);
   const avgR = rpes.length ? rpes.reduce(function(a,b){return a+b;},0)/rpes.length : null;
-  const anyFailedLow = sets.some(function(s){ return s.reps < ex.repLow-1; });
+  const anyFailedLow = sets.some(function(s){ return s.reps < range.lo-1; });
   const overloaded = avgR!==null && avgR>=9.3;
 
   if(anyFailedLow || overloaded){
     const w = roundToStep(topWeight*0.95, ex.type==='compound'?2.5:1);
-    return { weight:w, reps:ex.repLow, note:'Recovery dip last time — easing the load ~5% and resetting to the bottom of your rep range.' };
+    return { weight:w, reps:range.lo, note:'Recovery dip last time — easing the load ~5% and resetting to the bottom of your rep range.' };
   }
   if(allHitTop && (avgR===null || avgR<=8.3)){
     const baseBump = ex.type==='compound' ? 2.5 : (topWeight>=50?2.5:1);
@@ -1500,10 +1514,10 @@ function recommendation(exerciseId){
     const bump = Math.max(0.5, Math.round(baseBump*mult*2)/2);
     const w = roundToStep(topWeight+bump, 0.5);
     const levelNote = mult>1 ? ' You\'re early on this lift, so progress can come faster here.' : mult<1 ? ' Smaller, steadier jumps make sense at your current strength level.' : '';
-    return { weight:w, reps:ex.repLow, note:'Every set hit '+ex.repHigh+'+ reps comfortably — add '+bump+' lb and drop back to '+ex.repLow+' reps.'+levelNote };
+    return { weight:w, reps:range.lo, note:'Every set hit '+range.hi+'+ reps comfortably — add '+bump+' lb and drop back to '+range.lo+' reps.'+levelNote };
   }
   const bestSet = sets.reduce(function(m,s){ return s.reps>m.reps?s:m; }, sets[0]);
-  const nextReps = Math.min(ex.repHigh, (bestSet.reps||ex.repLow)+1);
+  const nextReps = Math.min(range.hi, (bestSet.reps||range.lo)+1);
   return { weight:topWeight, reps:nextReps, note:'Same weight as last time — chase '+nextReps+' reps before adding load.' };
 }
 
