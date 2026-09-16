@@ -1179,6 +1179,18 @@ function recoveryScore(recentCount){
   if(daysWithWorkout>=7) return 60;
   return 100;
 }
+/* Cardio isn't judged by the same "push toward failure" standard as a
+   lifting set. ACSM/WHO physical-activity guidelines (and the FITT-VP
+   framework built on them) are anchored on "moderate-to-vigorous"
+   intensity — on the Borg CR-10 perceived-exertion scale this app's
+   1-10 Strain field already implements, that's roughly a 4-8 band,
+   not a peak to chase every session. So the cardio ideal sits lower
+   than lifting's near-failure target, and the falloff is gentler
+   since moderate-to-vigorous is a wide zone, not a point. */
+const CARDIO_IDEAL_STRAIN = 6, CARDIO_STRAIN_FALLOFF = 14;
+function cardioIntensityScore(avgStrain){
+  return clamp(100 - Math.abs(avgStrain-CARDIO_IDEAL_STRAIN)*CARDIO_STRAIN_FALLOFF, 0, 100);
+}
 function sevenDayScore(){
   const recent = entriesInWindow(7);
   const prior = entriesInWindow(35).filter(function(w){ return daysAgo(w.date) > 7; });
@@ -1190,11 +1202,15 @@ function sevenDayScore(){
   const recentCardioMin = recent.reduce(function(s,w){ return s+cardioMinutes(w); },0);
   const priorCardioMin = prior.reduce(function(s,w){ return s+cardioMinutes(w); },0);
   const volScore = blendedVolumeScore(recentStrengthVol, priorStrengthVol/priorWeeks, recentCardioMin, priorCardioMin/priorWeeks);
-  // intensity: avg RPE across sets, ideal 7.5-9
-  let rpeSum=0, rpeN=0, pctSum=0, pctN=0;
+  // intensity: strength sets scored against the goal's Strain/%1RM target, cardio sets scored against the ACSM moderate-to-vigorous band, then blended
+  let rpeSum=0, rpeN=0, pctSum=0, pctN=0, cardioRpeSum=0, cardioRpeN=0;
   recent.forEach(function(w){
     (w.entries||[]).forEach(function(en){
       const ex = exById(en.exerciseId);
+      if(ex && ex.cardio){
+        (en.sets||[]).forEach(function(s){ if(s.rpe){ cardioRpeSum+=s.rpe; cardioRpeN++; } });
+        return;
+      }
       const best = bestE1rmEver(en.exerciseId, w.date);
       (en.sets||[]).forEach(function(s){
         if(s.rpe){ rpeSum+=s.rpe; rpeN++; }
@@ -1203,16 +1219,15 @@ function sevenDayScore(){
     });
   });
   const goalP = myGoalProfile();
+  let strengthIntensity = null, cardioIntensity = null;
+  if(rpeN) strengthIntensity = clamp(100 - Math.abs(rpeSum/rpeN-goalP.idealStrain)*28, 0, 100);
+  else if(pctN) strengthIntensity = clamp(100 - Math.abs(pctSum/pctN-goalP.idealPct)*220, 0, 100);
+  if(cardioRpeN) cardioIntensity = cardioIntensityScore(cardioRpeSum/cardioRpeN);
   let intensityScore;
-  if(rpeN){
-    const avg = rpeSum/rpeN;
-    intensityScore = clamp(100 - Math.abs(avg-goalP.idealStrain)*28, 0, 100);
-  } else if(pctN){
-    const avgPct = pctSum/pctN;
-    intensityScore = clamp(100 - Math.abs(avgPct-goalP.idealPct)*220, 0, 100);
-  } else {
-    intensityScore = recent.length ? 60 : 0;
-  }
+  if(strengthIntensity!==null && cardioIntensity!==null) intensityScore = (strengthIntensity+cardioIntensity)/2;
+  else if(cardioIntensity!==null) intensityScore = cardioIntensity;
+  else if(strengthIntensity!==null) intensityScore = strengthIntensity;
+  else intensityScore = recent.length ? 60 : 0;
   const overloadRaw = progressiveOverloadScore();
   const overloadScore = overloadRaw===null ? 60 : overloadRaw;
   const consistency = consistencyScore();
@@ -1259,8 +1274,13 @@ function workoutDayScoreParts(dateStr){
     else volScore = (strengthVol>0 || cardioMin>0) ? 70 : 0;
   }
 
-  let strainSum=0, strainN=0, pctSum=0, pctN=0;
+  let strainSum=0, strainN=0, pctSum=0, pctN=0, cardioStrainSum=0, cardioStrainN=0;
   entries.forEach(function(en){
+    const ex = exById(en.exerciseId);
+    if(ex && ex.cardio){
+      (en.sets||[]).forEach(function(s){ if(s.rpe){ cardioStrainSum+=s.rpe; cardioStrainN++; } });
+      return;
+    }
     const best = bestE1rmEver(en.exerciseId, dateStr);
     (en.sets||[]).forEach(function(s){
       if(s.rpe){ strainSum+=s.rpe; strainN++; }
@@ -1268,15 +1288,21 @@ function workoutDayScoreParts(dateStr){
     });
   });
   const goalP = myGoalProfile();
-  let intensityScore, strainAvg=null, pctAvg=null;
-  if(strainN){ strainAvg = strainSum/strainN; intensityScore = clamp(100-Math.abs(strainAvg-goalP.idealStrain)*28, 0, 100); }
-  else if(pctN){ pctAvg = pctSum/pctN; intensityScore = clamp(100-Math.abs(pctAvg-goalP.idealPct)*220, 0, 100); }
+  let strengthIntensity=null, strainAvg=null, pctAvg=null;
+  if(strainN){ strainAvg = strainSum/strainN; strengthIntensity = clamp(100-Math.abs(strainAvg-goalP.idealStrain)*28, 0, 100); }
+  else if(pctN){ pctAvg = pctSum/pctN; strengthIntensity = clamp(100-Math.abs(pctAvg-goalP.idealPct)*220, 0, 100); }
+  const cardioStrainAvg = cardioStrainN ? cardioStrainSum/cardioStrainN : null;
+  const cardioIntensity = cardioStrainAvg!==null ? cardioIntensityScore(cardioStrainAvg) : null;
+  let intensityScore;
+  if(strengthIntensity!==null && cardioIntensity!==null) intensityScore = (strengthIntensity+cardioIntensity)/2;
+  else if(cardioIntensity!==null) intensityScore = cardioIntensity;
+  else if(strengthIntensity!==null) intensityScore = strengthIntensity;
   else intensityScore = 60;
 
   const total = Math.round(volScore*0.5 + intensityScore*0.5);
   return {
     total, volScore:Math.round(volScore), intensityScore:Math.round(intensityScore),
-    strengthVol, cardioMin, avgSessionCardioMin, strainAvg, pctAvg, goalP,
+    strengthVol, cardioMin, avgSessionCardioMin, strainAvg, pctAvg, cardioStrainAvg, goalP,
     groupBreakdown: groupVol ? groupVol.breakdown : null
   };
 }
@@ -1323,19 +1349,32 @@ function workoutRecommendation(dateStr){
     const goalP = p.goalP || myGoalProfile();
     if(p.strainAvg!==null){
       if(p.strainAvg < goalP.idealStrain){
-        tips.push('Intensity: average Strain was '+p.strainAvg.toFixed(1)+' — for your '+goalP.label.toLowerCase()+' goal, pushing closer to '+goalP.idealStrain.toFixed(1)+' would move this into the green.');
+        tips.push('Lifting intensity: average Strain was '+p.strainAvg.toFixed(1)+' — for your '+goalP.label.toLowerCase()+' goal, pushing closer to '+goalP.idealStrain.toFixed(1)+' would move this into the green.');
       } else {
-        tips.push('Intensity: average Strain was '+p.strainAvg.toFixed(1)+' — a bit above the '+goalP.idealStrain.toFixed(1)+' target for your goal. Backing off slightly protects recovery without costing much here.');
+        tips.push('Lifting intensity: average Strain was '+p.strainAvg.toFixed(1)+' — a bit above the '+goalP.idealStrain.toFixed(1)+' target for your goal. Backing off slightly protects recovery without costing much here.');
       }
     } else if(p.pctAvg!==null){
       const pct = Math.round(p.pctAvg*100), idealPct = Math.round(goalP.idealPct*100);
       if(p.pctAvg < goalP.idealPct){
-        tips.push('Intensity: sets averaged about '+pct+'% of your best lift — working closer to '+idealPct+'% (or logging Strain instead) would score higher for your goal.');
+        tips.push('Lifting intensity: sets averaged about '+pct+'% of your best lift — working closer to '+idealPct+'% (or logging Strain instead) would score higher for your goal.');
       } else {
-        tips.push('Intensity: sets averaged about '+pct+'% of your best lift — above the ~'+idealPct+'% target for your goal. A touch lighter is fine and easier to recover from.');
+        tips.push('Lifting intensity: sets averaged about '+pct+'% of your best lift — above the ~'+idealPct+'% target for your goal. A touch lighter is fine and easier to recover from.');
       }
-    } else {
-      tips.push('Intensity: log a Strain rating (1-10) on your sets — right now there\'s nothing to score effort against, so it defaults to neutral.');
+    } else if(p.strengthVol>0){
+      tips.push('Lifting intensity: log a Strain rating (1-10) on your sets — right now there\'s nothing to score effort against, so it defaults to neutral.');
+    }
+    /* Cardio is judged against the ACSM moderate-to-vigorous band
+       (Strain ~4-8), not the same near-failure target as lifting —
+       chasing an 8+ on every cardio session isn't the guideline and
+       isn't what the score is looking for here. */
+    if(p.cardioStrainAvg!==null){
+      if(p.cardioStrainAvg < 4){
+        tips.push('Cardio intensity: average Strain was '+p.cardioStrainAvg.toFixed(1)+' — that\'s light-intensity. Picking up the pace into the moderate-to-vigorous range (Strain 4-8, the ACSM guideline for aerobic benefit) would score higher.');
+      } else if(p.cardioStrainAvg > 8){
+        tips.push('Cardio intensity: average Strain was '+p.cardioStrainAvg.toFixed(1)+' — that\'s near-maximal effort, harder than the moderate-to-vigorous range (Strain 4-8) aerobic guidelines call for. Easing off slightly is easier to sustain and recover from.');
+      }
+    } else if(p.cardioMin>0){
+      tips.push('Cardio intensity: log a Strain rating (1-10) on your cardio sets — right now there\'s nothing to score effort against, so it defaults to neutral.');
     }
   }
   return { green:false, tips: tips };
