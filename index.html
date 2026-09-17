@@ -243,6 +243,12 @@ a{ color:var(--accent); }
 
 .workout-log-list{ display:flex; flex-direction:column; gap:12px; }
 .finish-bar{ position:fixed; left:0; right:0; bottom:0; background:linear-gradient(to top, var(--bg) 60%, transparent); padding:20px 16px 18px; display:flex; justify-content:center; }
+.onboard-dots{ display:flex; justify-content:center; gap:6px; margin-top:16px; }
+.onboard-dot{ width:6px; height:6px; border-radius:50%; background:var(--surface-2); border:1px solid var(--border); }
+.onboard-dot.active{ background:var(--accent); border-color:var(--accent); }
+.onboard-goal-grid{ display:flex; flex-direction:column; gap:8px; }
+.onboard-goal-btn{ background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:12px 14px; font-size:14.5px; font-weight:600; color:var(--text); text-align:left; cursor:pointer; }
+.onboard-goal-btn.active{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent-2); }
 .finish-bar-inner{ max-width:640px; width:100%; display:flex; gap:10px; }
 .btn{ border:none; border-radius:12px; padding:13px 18px; font-size:14.5px; font-weight:600; cursor:pointer; }
 .btn-primary{ background:var(--accent); color:#fff; flex:1; }
@@ -507,7 +513,7 @@ let workouts = [];    // allWorkouts filtered to whichever profile is active (be
 let dbApi = null;
 let usingLocal = false;
 
-const state = { view:'home', draft:null, historyOpenId:null, pickerOpen:false, pickerQuery:'', addingCustom:false, detailExId:null, me:null, viewingFriend:null, editingWorkoutId:null, editingStats:false, friendMsg:null, friendMsgOk:false, chipInfoKey:null };
+const state = { view:'home', draft:null, historyOpenId:null, pickerOpen:false, pickerQuery:'', addingCustom:false, detailExId:null, me:null, viewingFriend:null, editingWorkoutId:null, editingStats:false, friendMsg:null, friendMsgOk:false, chipInfoKey:null, onboardStep:0, onboardGoal:null };
 
 function uid(){ return 'id_'+Math.random().toString(36).slice(2,10)+Date.now().toString(36); }
 function todayISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -1680,6 +1686,49 @@ function renderOnboarding(){
   +   '<button class="btn btn-primary" data-action="save-name" style="width:100%">Continue</button>'
   + '</div>';
 }
+/* First-run tour, shown once right after a new name is created (gated
+   by the ironledger_onboarded flag, never a returning user). Three
+   short screens: what the score chips mean, an optional goal pick,
+   and how the friend/feed system works — the three things a brand-new
+   user would otherwise have to discover by tapping around a blank
+   dashboard. */
+const ONBOARD_STEPS = 3;
+function onboardDots(step){
+  let d = '';
+  for(let i=1;i<=ONBOARD_STEPS;i++){ d += '<span class="onboard-dot'+(i===step?' active':'')+'"></span>'; }
+  return '<div class="onboard-dots">'+d+'</div>';
+}
+function renderOnboardTour(){
+  const step = state.onboardStep;
+  let body = '';
+  if(step===1){
+    body = '<h2 style="font-size:20px; margin:0 0 8px;">Your 7-Day Score</h2>'
+      + '<p style="color:var(--text-dim); font-size:14px; margin:0 0 16px; line-height:1.5;">Every workout you log rolls up into a 0-100 score built from six factors — how often you train each muscle, how much, how hard, whether you\'re actually getting stronger over time, how consistent you are, and whether you\'re resting enough.</p>'
+      + '<p style="color:var(--text-dim); font-size:14px; margin:0; line-height:1.5;">Tap the small <b>i</b> next to any chip, anytime, for exactly what it means and why.</p>';
+  } else if(step===2){
+    const goalOptions = Object.keys(GOAL_PROFILES).map(function(k){
+      const on = state.onboardGoal===k;
+      return '<button class="onboard-goal-btn'+(on?' active':'')+'" data-action="onboard-pick-goal" data-key="'+k+'">'+GOAL_PROFILES[k].label+'</button>';
+    }).join('');
+    body = '<h2 style="font-size:20px; margin:0 0 8px;">What\'s your goal?</h2>'
+      + '<p style="color:var(--text-dim); font-size:14px; margin:0 0 16px; line-height:1.5;">This calibrates your target volume, intensity, and weight-jump suggestions to real training-science ranges for what you\'re after. Totally optional, and changeable anytime from your profile.</p>'
+      + '<div class="onboard-goal-grid">'+goalOptions+'</div>';
+  } else if(step===3){
+    body = '<h2 style="font-size:20px; margin:0 0 8px;">Friends &amp; Feed</h2>'
+      + '<p style="color:var(--text-dim); font-size:14px; margin:0 0 16px; line-height:1.5;">Add training partners by username from the Friends tab, or pick them from Suggested. Once they accept, their workouts show up in your Feed — with reactions and streak celebrations.</p>'
+      + '<p style="color:var(--text-dim); font-size:14px; margin:0; line-height:1.5;">You\'re all set — log your first workout whenever you\'re ready.</p>';
+  }
+  const isLast = step===ONBOARD_STEPS;
+  return '<div class="topbar"><div class="brand"><span class="mark"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 12h2M18 12h2M7 8v8M17 8v8M9 12h6" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><h1>MuscleMax</h1></div></div>'
+    + '<div class="gauge-card" style="padding:28px 22px;">'
+    + body
+    + '</div>'
+    + onboardDots(step)
+    + '<div class="finish-bar"><div class="finish-bar-inner">'
+    + (step>1 ? '<button class="btn btn-ghost" data-action="onboard-back">Back</button>' : '')
+    + '<button class="btn btn-primary" data-action="'+(isLast?'onboard-finish':'onboard-next')+'">'+(isLast?'Let\'s go':(step===2?(state.onboardGoal?'Continue':'Skip for now'):'Next'))+'</button>'
+    + '</div></div>';
+}
 function renderLastWorkoutWidget(){
   if(!workouts.length) return '';
   const last = workouts[0];
@@ -2437,6 +2486,7 @@ function render(){
   const scrollTop = preserveScroll ? prevShell.scrollTop : 0;
   let html = '';
   if(!state.me){ html = renderOnboarding(); }
+  else if(state.onboardStep>0){ html = renderOnboardTour(); }
   else if(state.view==='home') html = renderHome();
   else if(state.view==='tracking') html = renderTracking();
   else if(state.view==='prs') html = renderPRs();
@@ -2445,7 +2495,7 @@ function render(){
   else if(state.view==='detail') html = renderDetail();
   else if(state.view==='friends') html = renderFriends();
   else if(state.view==='feed') html = renderFeed();
-  const showTabs = state.me && TAB_VIEWS.indexOf(state.view)>-1;
+  const showTabs = state.me && state.onboardStep===0 && TAB_VIEWS.indexOf(state.view)>-1;
   app.innerHTML = '<div class="shell">'+html+'</div>' + (showTabs ? renderTabBar() : '') + (state.editingStats ? statsModal() : '') + (state.chipInfoKey ? chipInfoModal() : '');
   const newShell = document.querySelector('.shell');
   if(newShell) newShell.scrollTop = scrollTop;
@@ -2487,8 +2537,23 @@ document.getElementById('app').addEventListener('click', async function(e){
     state.me = val;
     localStorage.setItem('ironledger_me', val);
     refreshScope();
+    let alreadyOnboarded = false;
+    try{ alreadyOnboarded = localStorage.getItem('ironledger_onboarded')==='1'; }catch(e){}
+    if(!alreadyOnboarded) state.onboardStep = 1;
     render();
     ensureMyProfileCode();
+  }
+  else if(action==='onboard-next'){ state.onboardStep++; render(); }
+  else if(action==='onboard-back'){ state.onboardStep--; render(); }
+  else if(action==='onboard-pick-goal'){
+    state.onboardGoal = t.getAttribute('data-key');
+    render();
+  }
+  else if(action==='onboard-finish'){
+    state.onboardStep = 0;
+    try{ localStorage.setItem('ironledger_onboarded','1'); }catch(e){}
+    render();
+    if(state.onboardGoal){ saveMyStats(Object.assign({}, myStats||{}, { goal: state.onboardGoal })); }
   }
   else if(action==='edit-name'){
     state.editingStats = true;
